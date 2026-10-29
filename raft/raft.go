@@ -842,7 +842,29 @@ func stepFollower(r *raft, m Message) error {
 	return nil
 }
 
+// validEntries checks that the entries of a MsgApp are contiguous from
+// PrevLogIndex+1 with non-decreasing terms. A correct leader always sends
+// such entries; a buggy or hostile peer must not be able to crash the node.
+func validEntries(m Message) bool {
+	prevTerm := m.PrevLogTerm
+	for i, e := range m.Entries {
+		if e.Index != m.PrevLogIndex+1+Index(i) || e.Term < prevTerm || e.Term == 0 {
+			return false
+		}
+		if e.Type != EntryNormal && e.Type != EntryConfChange {
+			return false
+		}
+		prevTerm = e.Term
+	}
+	return true
+}
+
 func (r *raft) handleAppendEntries(m Message) {
+	if !validEntries(m) {
+		r.logger.Error("dropping malformed append; the sender is buggy or hostile",
+			"from", m.From, "prev_index", m.PrevLogIndex, "entries", len(m.Entries))
+		return
+	}
 	if m.PrevLogIndex < r.raftLog.committed {
 		// Everything up to the commit index is final; tell the leader where
 		// we are instead of re-checking entries it already knows we have.
@@ -986,6 +1008,7 @@ func (r *raft) switchToConfig(cs ConfState) ConfState {
 			}
 		}
 	}
+	r.releaseReadsAfterConfChange()
 	if r.leadTransferee != None && !cs.IsVoter(r.leadTransferee) {
 		r.abortLeaderTransfer()
 	}
@@ -1074,9 +1097,29 @@ func (r *raft) handleReadIndex(m Message) {
 		r.pendingReadIndexMessages = append(r.pendingReadIndexMessages, m)
 		return
 	}
-	r.readOnly.addRequest(r.raftLog.committed, m)
-	r.readOnly.recvAck(r.id, m.Context)
-	r.bcastHeartbeatWithCtx(m.Context)
+	key := r.readOnly.addRequest(r.raftLog.committed, m)
+	r.readOnly.recvAck(r.id, key)
+	r.bcastHeartbeatWithCtx(key)
+}
+
+// releaseReadsAfterConfChange re-evaluates pending reads against the new
+// voter set: a change that removes voters can turn acknowledgements already
+// collected into a quorum, and a single remaining voter needs no
+// acknowledgement at all. Without this, such reads would wait for a
+// heartbeat response that never comes.
+func (r *raft) releaseReadsAfterConfChange() {
+	var lastSatisfied []byte
+	for _, key := range r.readOnly.pendingKeys() {
+		if r.countVoterAcks(r.readOnly.recvAck(r.id, []byte(key))) >= r.quorum() {
+			lastSatisfied = []byte(key)
+		}
+	}
+	if lastSatisfied == nil {
+		return
+	}
+	for _, rs := range r.readOnly.advance(lastSatisfied) {
+		r.respondToReadIndex(rs.req, rs.index)
+	}
 }
 
 func (r *raft) respondToReadIndex(req Message, index Index) {
@@ -1201,6 +1244,12 @@ func (r *raft) tickHeartbeat() {
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
 		r.heartbeatElapsed = 0
 		r.bcastHeartbeat()
+		// A transfer target that is up to date was asked to campaign; repeat
+		// the request every heartbeat in case it was lost, since proposals
+		// are refused until the transfer completes or times out.
+		if pr := r.prs[r.leadTransferee]; pr != nil && pr.Match == r.raftLog.lastIndex() {
+			r.sendTimeoutNow(r.leadTransferee)
+		}
 	}
 }
 

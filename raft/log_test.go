@@ -119,16 +119,16 @@ func TestLogMaybeAppend(t *testing.T) {
 	}
 }
 
-func TestLogConflictOnCommittedEntryPanics(t *testing.T) {
+func TestLogConflictOnCommittedEntryIsRefused(t *testing.T) {
 	t.Parallel()
 	l, _ := newTestLog(t, ents(1, 1, 2, 2, 3, 3), 0, 0)
 	l.committed = 3
-	defer func() {
-		if recover() == nil {
-			t.Fatal("overwriting a committed entry did not panic")
-		}
-	}()
-	l.maybeAppend(1, 1, 3, ents(2, 5))
+	if _, ok := l.maybeAppend(1, 1, 3, ents(2, 5)); ok {
+		t.Fatal("append that contradicts a committed entry was accepted")
+	}
+	if got := entriesString(l.allEntries()); got != entriesString(ents(1, 1, 2, 2, 3, 3)) {
+		t.Fatalf("log changed: %s", got)
+	}
 }
 
 func TestLogConflictHints(t *testing.T) {

@@ -210,7 +210,12 @@ func (l *raftLog) maybeAppend(prevIndex Index, prevTerm Term, commit Index, ents
 	case ci == 0:
 		// Every entry already matches; nothing to append.
 	case ci <= l.committed:
-		panic(fmt.Sprintf("raft: entry %d conflicts with committed entry (commit %d)", ci, l.committed))
+		// A committed entry can only be contradicted by a leader that
+		// violates Raft's invariants or by a hostile peer. Refuse the append
+		// rather than crash: the local log is the trustworthy side.
+		l.logger.Error("refusing append that conflicts with a committed entry",
+			"index", ci, "committed", l.committed)
+		return 0, false
 	default:
 		offset := prevIndex + 1
 		l.append(ents[ci-offset:]...)

@@ -27,21 +27,38 @@ func newReadOnly() *readOnly {
 	return &readOnly{pending: make(map[string]*readIndexStatus)}
 }
 
-// addRequest queues a read request with the given read index. Duplicate
-// contexts are ignored.
-func (ro *readOnly) addRequest(index Index, m Message) {
-	key := string(m.Context)
-	if _, ok := ro.pending[key]; ok {
-		return
+// readKey derives the wire context used to track a request: the requester's
+// id followed by the application's context. Two requesters may legitimately
+// use the same context bytes (for example a per-node counter), and the key
+// keeps their requests apart. The key travels in heartbeats and comes back in
+// acknowledgements; respondToReadIndex returns the original context.
+func readKey(from NodeID, context []byte) []byte {
+	key := make([]byte, 8+len(context))
+	for i := range 8 {
+		key[7-i] = byte(uint64(from) >> (8 * i))
 	}
-	ro.pending[key] = &readIndexStatus{req: m, index: index, acks: make(map[NodeID]struct{})}
-	ro.queue = append(ro.queue, key)
+	copy(key[8:], context)
+	return key
 }
 
-// recvAck records that node id acknowledged the heartbeat carrying context and
-// returns the set of acknowledging nodes, or nil if the context is unknown.
-func (ro *readOnly) recvAck(id NodeID, context []byte) map[NodeID]struct{} {
-	rs, ok := ro.pending[string(context)]
+// addRequest queues a read request with the given read index and returns the
+// wire context to carry in heartbeats. A request that is already pending
+// (same requester and context) is not queued twice.
+func (ro *readOnly) addRequest(index Index, m Message) []byte {
+	key := readKey(m.From, m.Context)
+	if _, ok := ro.pending[string(key)]; ok {
+		return key
+	}
+	ro.pending[string(key)] = &readIndexStatus{req: m, index: index, acks: make(map[NodeID]struct{})}
+	ro.queue = append(ro.queue, string(key))
+	return key
+}
+
+// recvAck records that node id acknowledged the heartbeat carrying the wire
+// context and returns the set of acknowledging nodes, or nil if the context
+// is unknown.
+func (ro *readOnly) recvAck(id NodeID, key []byte) map[NodeID]struct{} {
+	rs, ok := ro.pending[string(key)]
 	if !ok {
 		return nil
 	}
@@ -50,12 +67,12 @@ func (ro *readOnly) recvAck(id NodeID, context []byte) map[NodeID]struct{} {
 }
 
 // advance releases every request queued up to and including the one with the
-// given context, in order. It returns nil if the context is unknown.
-func (ro *readOnly) advance(context []byte) []*readIndexStatus {
-	key := string(context)
+// given wire context, in order. It returns nil if the context is unknown.
+func (ro *readOnly) advance(key []byte) []*readIndexStatus {
+	k0 := string(key)
 	pos := -1
 	for i, k := range ro.queue {
-		if k == key {
+		if k == k0 {
 			pos = i
 			break
 		}
@@ -72,7 +89,10 @@ func (ro *readOnly) advance(context []byte) []*readIndexStatus {
 	return released
 }
 
-// lastPendingRequestCtx returns the context of the most recent pending
+// pendingKeys returns the wire contexts of every pending request in order.
+func (ro *readOnly) pendingKeys() []string { return ro.queue }
+
+// lastPendingRequestCtx returns the wire context of the most recent pending
 // request, which heartbeats carry so that acknowledgements keep flowing even
 // if the original heartbeat round was lost.
 func (ro *readOnly) lastPendingRequestCtx() []byte {

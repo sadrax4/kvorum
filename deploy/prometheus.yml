@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: kvorum
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - node1:2381
+          - node2:2381
+          - node3:2381

@@ -29,6 +29,11 @@ func (s *Server) toStatus(err error) error {
 		return s.notLeader("no leader elected")
 	case errors.Is(err, node.ErrProposalLost):
 		return s.notLeader("leadership changed before the request was applied; retry")
+	case errors.Is(err, node.ErrLeadershipTransferring):
+		// Deliberately without a leader hint: the hint would point back at
+		// this node and make clients retry in a tight loop instead of
+		// backing off until the transfer completes.
+		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, raft.ErrConfChangePending), errors.Is(err, raft.ErrLeaderTermNotCommitted):
 		return status.Error(codes.Unavailable, err.Error())
 	case errors.Is(err, node.ErrStopped), errors.Is(err, node.ErrRemoved):

@@ -90,6 +90,9 @@ type Server struct {
 
 	wg       sync.WaitGroup
 	stopOnce sync.Once
+	// stopC is closed at the start of Stop so that long-lived streams such
+	// as Watch end promptly instead of holding up the graceful drain.
+	stopC chan struct{}
 }
 
 // New creates a server for the given node. Nothing is bound until Start.
@@ -98,7 +101,7 @@ func New(c Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, node: cfg.Node, metrics: cfg.Metrics, logger: cfg.Logger.With("component", "server")}
+	s := &Server{cfg: cfg, node: cfg.Node, metrics: cfg.Metrics, logger: cfg.Logger.With("component", "server"), stopC: make(chan struct{})}
 
 	s.grpcServer = grpc.NewServer(
 		grpc.MaxRecvMsgSize(cfg.MaxMessageSize),
@@ -166,6 +169,7 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	var err error
 	s.stopOnce.Do(func() {
+		close(s.stopC)
 		done := make(chan struct{})
 		go func() {
 			s.grpcServer.GracefulStop()
@@ -203,14 +207,27 @@ func (s *Server) HTTPAddress() string {
 	return s.httpLis.Addr().String()
 }
 
+// handleHealthz reports liveness: the process serves and the node's run
+// loop has not died.
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
+	if err := s.node.Err(); err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = fmt.Fprintf(w, "node failed: %v\n", err)
+		return
+	}
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-// handleReadyz reports readiness: the node must know a leader.
+// handleReadyz reports readiness: the node must be running and know a
+// leader.
 func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
+	if !s.node.Running() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("node stopped\n"))
+		return
+	}
 	if _, ok := s.node.Leader(); !ok {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("no leader\n"))

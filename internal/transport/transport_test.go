@@ -279,3 +279,21 @@ func TestStartFailsOnBusyAddress(t *testing.T) {
 		t.Fatal("Start on a busy address succeeded")
 	}
 }
+
+// TestSnapshotToUnknownPeerIsReportedFailed covers a MsgSnap addressed to a
+// peer the transport does not know: Raft pauses replication to that follower
+// until it hears about the snapshot, so the drop must be reported.
+func TestSnapshotToUnknownPeerIsReportedFailed(t *testing.T) {
+	t.Parallel()
+	h := &recordingHandler{}
+	tr, err := New(Config{LocalID: 1, ListenAddress: "127.0.0.1:0", Handler: h})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tr.Stop()
+	tr.Send([]raft.Message{{Type: raft.MsgSnap, From: 1, To: 9, Term: 1, Snapshot: &raft.Snapshot{Meta: raft.SnapshotMeta{Index: 1, Term: 1}}}})
+	reports := h.snapshotReports()
+	if len(reports) != 1 || reports[0].id != 9 || reports[0].succeeded {
+		t.Fatalf("snapshot reports = %+v, want one failure for peer 9", reports)
+	}
+}

@@ -62,8 +62,14 @@ func (n *Node) run() {
 		}
 		if err := n.processReady(); err != nil {
 			// Storage failures are not recoverable: the node must not keep
-			// acknowledging writes it cannot persist.
+			// acknowledging writes it cannot persist. Stop serving entirely
+			// rather than linger as a member that looks alive.
 			n.logger.Error("fatal error while processing raft output; stopping node", "error", err)
+			n.fatalErr.Store(&err)
+			n.stopOnce.Do(func() { close(n.stopC) })
+			n.mu.Lock()
+			n.leader, n.state, n.progress = raft.None, raft.StateFollower, nil
+			n.mu.Unlock()
 			n.failWaiters(err)
 			n.failReads(err)
 			return
@@ -126,7 +132,7 @@ func translateProposeError(err error) error {
 	case errors.Is(err, raft.ErrNotLeader):
 		return ErrNotLeader
 	case errors.Is(err, raft.ErrProposalDropped):
-		return fmt.Errorf("%w: leadership transfer in progress", ErrNotLeader)
+		return ErrLeadershipTransferring
 	default:
 		return err
 	}
@@ -144,6 +150,7 @@ func (n *Node) submitRead(r *readWaiter) {
 	}
 	n.readSeq++
 	r.id = n.readSeq
+	r.leader = bs.Leader
 	n.readWaiters[r.id] = r
 	n.rn.ReadIndex(encodeReadContext(r.id))
 }
@@ -289,6 +296,16 @@ func (n *Node) onSoftStateChange(ss raft.SoftState) {
 	if ss.Leader != prevLeader {
 		n.metrics.RaftLeaderChanges.Inc()
 		n.logger.Info("leader changed", "leader", ss.Leader, "state", ss.State)
+		// Reads forwarded to the previous leader will never be answered by
+		// the new one; fail them quickly so that clients retry instead of
+		// waiting for their deadline. Reads that already hold a read index
+		// stay valid and are released once the index is applied.
+		for id, r := range n.readWaiters {
+			if r.leader != ss.Leader {
+				delete(n.readWaiters, id)
+				r.resolve(ErrNoLeader)
+			}
+		}
 	}
 	if prevState == raft.StateLeader && ss.State != raft.StateLeader {
 		// Proposals accepted by this node may still commit through the new
@@ -354,9 +371,14 @@ func (n *Node) applyNormal(e raft.Entry) kv.Result {
 			return kv.Result{}
 		}
 		n.mu.Lock()
-		m := n.members[attrs.ID]
-		m.ClientAddress = attrs.ClientAddress
-		n.members[attrs.ID] = m
+		// Attributes for a node that is not a member at this point of the
+		// log are ignored identically on every node, so phantom ids never
+		// enter the table.
+		if n.confState.Contains(attrs.ID) {
+			m := n.members[attrs.ID]
+			m.ClientAddress = attrs.ClientAddress
+			n.members[attrs.ID] = m
+		}
 		n.mu.Unlock()
 		return kv.Result{}
 	default:
@@ -485,10 +507,14 @@ func (n *Node) failReads(err error) {
 // the last one.
 func (n *Node) maybeSnapshot() {
 	applied := n.appliedIndex.Load()
-	if applied-n.snapshotIndex.Load() < n.cfg.SnapshotThreshold {
+	if applied-n.snapshotIndex.Load() < n.cfg.SnapshotThreshold || n.ticks < n.snapshotRetryTick {
 		return
 	}
 	if _, err := n.takeSnapshot(); err != nil {
-		n.logger.Error("snapshot failed", "error", err)
+		// Back off for several election timeouts; a persistent failure
+		// (full disk, unwritable directory) must not turn every loop
+		// iteration into a full serialisation of the store.
+		n.snapshotRetryTick = n.ticks + uint64(n.cfg.ElectionTick)*10
+		n.logger.Error("snapshot failed; will retry later", "error", err, "retry_in_ticks", n.snapshotRetryTick-n.ticks)
 	}
 }

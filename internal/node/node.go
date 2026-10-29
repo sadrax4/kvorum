@@ -166,6 +166,10 @@ type Node struct {
 	// follower); publishInFlight guards the follower's asynchronous RPC.
 	publishedAt     raft.Term
 	publishInFlight bool
+	// snapshotRetryTick delays snapshot attempts after a failure so that a
+	// persistent error does not turn every loop iteration into a full
+	// serialisation of the store.
+	snapshotRetryTick uint64
 
 	removedOnce sync.Once
 	removedC    chan struct{}
@@ -173,6 +177,8 @@ type Node struct {
 	stopC       chan struct{}
 	doneC       chan struct{}
 	started     atomic.Bool
+	// fatalErr records the storage error that stopped the run loop, if any.
+	fatalErr atomic.Pointer[error]
 }
 
 // Open restores the node's state from DataDir (or initialises a new node)
@@ -370,6 +376,33 @@ func (n *Node) RaftAddress() string { return n.transport.Address() }
 // Removed returns a channel that is closed once the node has been removed
 // from the cluster, at which point the process should exit.
 func (n *Node) Removed() <-chan struct{} { return n.removedC }
+
+// Done returns a channel that is closed once the run loop has exited, either
+// because Stop was called or because a storage error made it impossible to
+// continue safely. Err tells which.
+func (n *Node) Done() <-chan struct{} { return n.doneC }
+
+// Err returns the fatal error that stopped the node, or nil.
+func (n *Node) Err() error {
+	if p := n.fatalErr.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
+// Running reports whether the node is serving: started, not stopped, and
+// not halted by a fatal error.
+func (n *Node) Running() bool {
+	if !n.started.Load() {
+		return false
+	}
+	select {
+	case <-n.stopC:
+		return false
+	default:
+		return true
+	}
+}
 
 // Status is a point-in-time view of the node for monitoring.
 type Status struct {

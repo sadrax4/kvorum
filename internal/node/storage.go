@@ -59,15 +59,31 @@ func (n *Node) openStorage(walDir, snapDir string) (fresh bool, applied raft.Ind
 		}
 		applied = snap.Meta.Index
 		n.snapshotIndex.Store(uint64(snap.Meta.Index))
+		if snap.Meta.Index > replay.SnapshotMeta.Index {
+			// The snapshot file was made durable but the crash came before
+			// its marker reached the log. Record it now, otherwise entries
+			// replayed from before the snapshot and entries appended after
+			// it would leave a gap on the next restart.
+			n.logger.Warn("recording snapshot marker missing from the wal", "snapshot_index", snap.Meta.Index)
+			if err := w.SaveSnapshot(snap.Meta); err != nil {
+				_ = w.Close()
+				return false, 0, fmt.Errorf("node: record snapshot %d in wal: %w", snap.Meta.Index, err)
+			}
+		}
 	}
 
-	if len(replay.Entries) > 0 {
-		first := replay.Entries[0].Index
-		if first > snap.Meta.Index+1 {
+	// Entries covered by the snapshot are redundant; the rest must continue
+	// the log directly after it.
+	entries := replay.Entries
+	for len(entries) > 0 && entries[0].Index <= snap.Meta.Index {
+		entries = entries[1:]
+	}
+	if len(entries) > 0 {
+		if first := entries[0].Index; first > snap.Meta.Index+1 {
 			_ = w.Close()
 			return false, 0, fmt.Errorf("node: wal entries start at %d but the snapshot ends at %d", first, snap.Meta.Index)
 		}
-		if err := n.raftStorage.Append(replay.Entries); err != nil {
+		if err := n.raftStorage.Append(entries); err != nil {
 			_ = w.Close()
 			return false, 0, fmt.Errorf("node: replay entries: %w", err)
 		}
@@ -79,7 +95,7 @@ func (n *Node) openStorage(walDir, snapDir string) (fresh bool, applied raft.Ind
 	last, _ := n.raftStorage.LastIndex()
 	fresh = last == 0 && snap.IsEmpty() && replay.HardState.IsEmpty()
 	n.logger.Info("storage opened",
-		"fresh", fresh, "snapshot_index", snap.Meta.Index, "entries", len(replay.Entries),
+		"fresh", fresh, "snapshot_index", snap.Meta.Index, "entries", len(entries),
 		"last_index", last, "hard_state_term", replay.HardState.Term, "hard_state_commit", replay.HardState.Commit)
 	return fresh, applied, nil
 }

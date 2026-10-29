@@ -11,6 +11,11 @@ var (
 	// example during an election or while partitioned from the quorum.
 	ErrNoLeader = errors.New("node: no leader elected")
 
+	// ErrLeadershipTransferring is returned while the leader is handing over
+	// to another node and therefore refuses new proposals. It clears within
+	// an election timeout; clients should back off and retry.
+	ErrLeadershipTransferring = errors.New("node: leadership transfer in progress")
+
 	// ErrProposalLost is returned when the node lost leadership after
 	// accepting a proposal and a different entry was committed in its place.
 	// The proposal may or may not have been applied by the new leader; with a

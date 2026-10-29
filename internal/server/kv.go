@@ -157,7 +157,7 @@ func (k *kvService) Scan(ctx context.Context, req *kvorumpb.ScanRequest) (*kvoru
 	if err := k.read(ctx, req.GetConsistency()); err != nil {
 		return nil, k.s.toStatus(err)
 	}
-	kvs, more := k.s.node.Store().Scan(req.GetStart(), req.GetEnd(), limit)
+	kvs, more := k.s.node.Store().Scan(req.GetStart(), unboundedEnd(req.GetEnd()), limit)
 	resp := &kvorumpb.ScanResponse{Header: k.header(), Kvs: make([]*kvorumpb.KeyValue, 0, len(kvs)), More: more}
 	for i := range kvs {
 		resp.Kvs = append(resp.Kvs, toProtoKV(&kvs[i]))
@@ -184,6 +184,8 @@ func (k *kvService) Watch(req *kvorumpb.WatchRequest, stream grpc.ServerStreamin
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-k.s.stopC:
+			return status.Error(codes.Unavailable, "server shutting down")
 		case ev, ok := <-w.Events():
 			if !ok {
 				return k.s.toStatus(fmt.Errorf("watch ended: %w", w.Err()))
@@ -207,6 +209,16 @@ func (k *kvService) Watch(req *kvorumpb.WatchRequest, stream grpc.ServerStreamin
 			return err
 		}
 	}
+}
+
+// unboundedEnd maps the wire convention for "every key from start onwards"
+// (a range end consisting of the single byte 0x00, which no real key can be
+// smaller than) to the store's representation for Scan.
+func unboundedEnd(end []byte) []byte {
+	if len(end) == 1 && end[0] == 0 {
+		return nil
+	}
+	return end
 }
 
 func toProtoEvent(ev kv.Event) *kvorumpb.Event {

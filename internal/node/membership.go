@@ -10,6 +10,10 @@ import (
 	"github.com/sadrax4/kvorum/raft"
 )
 
+// maxAddressLength bounds the addresses stored in the replicated membership
+// table, which are proposed by other nodes over the Raft transport.
+const maxAddressLength = 256
+
 // Member describes a cluster member as seen by the node.
 type Member struct {
 	ID            raft.NodeID `json:"id"`

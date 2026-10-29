@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/sadrax4/kvorum/internal/telemetry"
@@ -92,6 +93,15 @@ type attributePublisher Node
 // membership table. It succeeds only on the leader.
 func (p *attributePublisher) PublishAttributes(ctx context.Context, id raft.NodeID, clientAddress string) error {
 	n := (*Node)(p)
+	if len(clientAddress) > maxAddressLength {
+		return fmt.Errorf("%w: client address exceeds %d bytes", ErrInvalidMember, maxAddressLength)
+	}
+	n.mu.RLock()
+	member := n.confState.Contains(id)
+	n.mu.RUnlock()
+	if !member {
+		return fmt.Errorf("%w: node %d is not a member", ErrInvalidMember, id)
+	}
 	prop := newProposal(ctx, proposalAttrs)
 	prop.data = encodeEntry(entryKindAttrs, encodeMemberAttrs(memberAttrs{ID: id, ClientAddress: clientAddress}))
 	_, err := n.await(prop)

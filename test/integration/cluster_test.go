@@ -479,6 +479,16 @@ func TestMembershipChangesAndSnapshotCatchUp(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("add learner: %v", err)
 	}
+	// Membership changes are idempotent so that retries after ambiguous
+	// failures are safe.
+	if _, err := lead.admin.AddMember(ctx, &kvorumpb.AddMemberRequest{Member: &kvorumpb.Member{
+		Id: 4, RaftAddress: c.raft[4], ClientAddress: c.client[4], Learner: true,
+	}}); err != nil {
+		t.Fatalf("repeated add learner: %v", err)
+	}
+	if _, err := lead.admin.RemoveMember(ctx, &kvorumpb.RemoveMemberRequest{Id: 42}); err != nil {
+		t.Fatalf("remove non-member: %v", err)
+	}
 	eventually(t, 20*time.Second, func() error {
 		r, err := c.get(ctx, joiner, "k059", kvorumpb.ReadConsistency_READ_CONSISTENCY_STALE)
 		if err != nil {

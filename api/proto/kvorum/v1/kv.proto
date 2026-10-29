@@ -1,0 +1,289 @@
+syntax = "proto3";
+
+package kvorum.v1;
+
+option go_package = "github.com/sadrax4/kvorum/api/kvorumpb;kvorumpb";
+
+// KVService is the client-facing key-value API.
+//
+// All write operations are replicated through Raft and acknowledged only after
+// they are committed by a quorum and applied on the serving node. Reads default
+// to linearizable semantics, implemented with the ReadIndex protocol, and can be
+// relaxed per request.
+//
+// A node that is not the leader rejects writes and linearizable reads with
+// gRPC status UNAVAILABLE and attaches a LeaderHint detail so that clients can
+// follow the leader.
+service KVService {
+  // Get returns the value stored at a key.
+  rpc Get(GetRequest) returns (GetResponse);
+  // Put stores a value, creating the key or overwriting it.
+  rpc Put(PutRequest) returns (PutResponse);
+  // Delete removes a key.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  // CompareAndSwap writes a value only if the key's current version matches
+  // the expected version. An expected version of zero means "the key must not
+  // exist", which makes the call a create-if-absent primitive.
+  rpc CompareAndSwap(CompareAndSwapRequest) returns (CompareAndSwapResponse);
+  // Scan returns the keys in the half-open range [start, end) in ascending
+  // byte order.
+  rpc Scan(ScanRequest) returns (ScanResponse);
+  // Watch streams changes to a key or a key range, starting from the moment
+  // the watch is registered.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}
+
+// AdminService exposes cluster membership and operational controls.
+service AdminService {
+  // Status reports the Raft state of the serving node.
+  rpc Status(StatusRequest) returns (StatusResponse);
+  // ListMembers returns the current cluster membership.
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  // AddMember adds a voter or learner. Adding as a learner first and promoting
+  // after the node has caught up avoids availability dips.
+  rpc AddMember(AddMemberRequest) returns (AddMemberResponse);
+  // RemoveMember removes a voter or learner from the cluster.
+  rpc RemoveMember(RemoveMemberRequest) returns (RemoveMemberResponse);
+  // PromoteMember turns a learner into a voter.
+  rpc PromoteMember(PromoteMemberRequest) returns (PromoteMemberResponse);
+  // TransferLeadership asks the leader to hand leadership to another voter.
+  rpc TransferLeadership(TransferLeadershipRequest) returns (TransferLeadershipResponse);
+  // Snapshot forces the serving node to take a snapshot and compact its log.
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+}
+
+// ReadConsistency selects the guarantee a read operation provides.
+enum ReadConsistency {
+  // Treated as LINEARIZABLE.
+  READ_CONSISTENCY_UNSPECIFIED = 0;
+  // The read reflects every write acknowledged before it started. The leader
+  // confirms it still holds a quorum (ReadIndex) before answering; followers
+  // forward the request to the leader.
+  READ_CONSISTENCY_LINEARIZABLE = 1;
+  // The read is served from the local replica's applied state without any
+  // coordination. It may lag behind the leader but always reflects a prefix
+  // of the committed log.
+  READ_CONSISTENCY_STALE = 2;
+}
+
+// ResponseHeader is attached to every response.
+message ResponseHeader {
+  // member_id is the id of the node that served the request.
+  uint64 member_id = 1;
+  // term is the Raft term in which the request was served.
+  uint64 term = 2;
+  // revision is the Raft log index of the last entry applied by the serving
+  // node when the response was produced. Revisions are totally ordered and
+  // match the mod_revision fields of KeyValue.
+  uint64 revision = 3;
+}
+
+// LeaderHint is attached as an error detail when a request reaches a node that
+// is not the leader.
+message LeaderHint {
+  // leader_id is zero when the node does not currently know a leader.
+  uint64 leader_id = 1;
+  // leader_address is the client-facing address of the leader, if known.
+  string leader_address = 2;
+}
+
+// Session identifies a client and a request within that client's sequence,
+// enabling exactly-once write semantics across retries. The state machine
+// remembers the last sequence number applied for each client and returns the
+// recorded result instead of re-executing a duplicate.
+message Session {
+  uint64 client_id = 1;
+  uint64 sequence = 2;
+}
+
+// KeyValue is a key together with its value and version metadata.
+message KeyValue {
+  bytes key = 1;
+  bytes value = 2;
+  // version counts the writes to the key since it was created; the first
+  // write has version 1. Deleting the key resets it.
+  uint64 version = 3;
+  // create_revision is the revision at which the key was created.
+  uint64 create_revision = 4;
+  // mod_revision is the revision of the last write to the key.
+  uint64 mod_revision = 5;
+}
+
+message GetRequest {
+  bytes key = 1;
+  ReadConsistency consistency = 2;
+}
+
+message GetResponse {
+  ResponseHeader header = 1;
+  // found is false when the key does not exist; kv is then unset.
+  bool found = 2;
+  KeyValue kv = 3;
+}
+
+message PutRequest {
+  bytes key = 1;
+  bytes value = 2;
+  Session session = 3;
+  // prev_kv requests the previous value in the response.
+  bool prev_kv = 4;
+}
+
+message PutResponse {
+  ResponseHeader header = 1;
+  // kv is the key as stored after the write.
+  KeyValue kv = 2;
+  KeyValue prev_kv = 3;
+}
+
+message DeleteRequest {
+  bytes key = 1;
+  Session session = 2;
+  bool prev_kv = 3;
+}
+
+message DeleteResponse {
+  ResponseHeader header = 1;
+  // deleted is false when the key did not exist.
+  bool deleted = 2;
+  KeyValue prev_kv = 3;
+}
+
+message CompareAndSwapRequest {
+  bytes key = 1;
+  // expected_version must equal the key's current version, or zero when the
+  // key is expected not to exist.
+  uint64 expected_version = 2;
+  bytes value = 3;
+  Session session = 4;
+}
+
+message CompareAndSwapResponse {
+  ResponseHeader header = 1;
+  bool succeeded = 2;
+  // kv is the key as stored after the call: the new value on success, the
+  // current value on failure. It is unset if the key does not exist.
+  KeyValue kv = 3;
+}
+
+message ScanRequest {
+  // start is inclusive. An empty start begins at the smallest key.
+  bytes start = 1;
+  // end is exclusive. An empty end extends to the largest key.
+  bytes end = 2;
+  // limit caps the number of returned keys; zero means no limit beyond the
+  // server's maximum.
+  int64 limit = 3;
+  ReadConsistency consistency = 4;
+}
+
+message ScanResponse {
+  ResponseHeader header = 1;
+  repeated KeyValue kvs = 2;
+  // more is true when the limit cut the result short.
+  bool more = 3;
+}
+
+message WatchRequest {
+  // key is the start of the watched range (inclusive).
+  bytes key = 1;
+  // range_end is the exclusive end of the watched range. Leave empty to watch
+  // a single key.
+  bytes range_end = 2;
+}
+
+// Event describes one change to a key.
+message Event {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_PUT = 1;
+    TYPE_DELETE = 2;
+  }
+  Type type = 1;
+  // kv is the key after the change. For deletes only key and mod_revision are
+  // set.
+  KeyValue kv = 2;
+  KeyValue prev_kv = 3;
+}
+
+message WatchResponse {
+  ResponseHeader header = 1;
+  repeated Event events = 2;
+}
+
+// Member describes one node of the cluster.
+message Member {
+  uint64 id = 1;
+  // raft_address is the address peers use for Raft traffic.
+  string raft_address = 2;
+  // client_address is the address clients use for the KV API.
+  string client_address = 3;
+  bool learner = 4;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  ResponseHeader header = 1;
+  uint64 id = 2;
+  // state is one of follower, pre-candidate, candidate, leader.
+  string state = 3;
+  uint64 term = 4;
+  uint64 leader = 5;
+  uint64 commit_index = 6;
+  uint64 applied_index = 7;
+  uint64 last_index = 8;
+  uint64 snapshot_index = 9;
+  repeated Member members = 10;
+  string version = 11;
+}
+
+message ListMembersRequest {}
+
+message ListMembersResponse {
+  ResponseHeader header = 1;
+  repeated Member members = 2;
+  uint64 leader = 3;
+}
+
+message AddMemberRequest {
+  Member member = 1;
+}
+
+message AddMemberResponse {
+  ResponseHeader header = 1;
+  repeated Member members = 2;
+}
+
+message RemoveMemberRequest {
+  uint64 id = 1;
+}
+
+message RemoveMemberResponse {
+  ResponseHeader header = 1;
+  repeated Member members = 2;
+}
+
+message PromoteMemberRequest {
+  uint64 id = 1;
+}
+
+message PromoteMemberResponse {
+  ResponseHeader header = 1;
+  repeated Member members = 2;
+}
+
+message TransferLeadershipRequest {
+  uint64 target_id = 1;
+}
+
+message TransferLeadershipResponse {
+  ResponseHeader header = 1;
+}
+
+message SnapshotRequest {}
+
+message SnapshotResponse {
+  ResponseHeader header = 1;
+  uint64 snapshot_index = 2;
+}

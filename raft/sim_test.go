@@ -856,19 +856,6 @@ func (s *sim) converged(lead *simNode) bool {
 	return true
 }
 
-func (s *sim) allMembersApplied(idx Index) bool {
-	lead := s.currentLeader()
-	if lead == nil {
-		return false
-	}
-	for _, n := range s.members(lead) {
-		if !n.alive || n.appliedIndex < idx {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *sim) checkStateMachinesEqual() {
 	lead := s.currentLeader()
 	if lead == nil {

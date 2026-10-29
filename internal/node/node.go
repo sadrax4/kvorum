@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -231,15 +232,7 @@ func Open(c Config) (*Node, error) {
 		if cfg.Join {
 			n.logger.Info("starting as a joining node; waiting for the leader", "peers", cfg.InitialCluster)
 		} else {
-			peers := make([]raft.Peer, 0, len(cfg.InitialCluster))
-			for id, addr := range cfg.InitialCluster {
-				mc := memberContext{RaftAddress: addr}
-				if id == cfg.ID {
-					mc.ClientAddress = cfg.AdvertiseClient
-				}
-				peers = append(peers, raft.Peer{ID: id, Context: encodeMemberContext(mc)})
-			}
-			if err := rn.Bootstrap(peers); err != nil {
+			if err := rn.Bootstrap(bootstrapPeers(cfg.InitialCluster)); err != nil {
 				_ = n.wal.Close()
 				return nil, fmt.Errorf("node: bootstrap: %w", err)
 			}
@@ -248,6 +241,10 @@ func Open(c Config) (*Node, error) {
 	}
 	n.members[cfg.ID] = memberContext{RaftAddress: cfg.AdvertiseRaft, ClientAddress: cfg.AdvertiseClient}
 	n.confState = rn.ConfState()
+	// Read contexts must not repeat across restarts: a response to a read
+	// issued by a previous incarnation of this process must never satisfy a
+	// newer read. Starting from the clock makes that practically impossible.
+	n.readSeq = uint64(time.Now().UnixNano())
 	n.refreshStatusLocked(rn.BasicStatus())
 
 	t, err := transport.New(transport.Config{
@@ -412,4 +409,21 @@ func (n *Node) raftStatusLocked() raft.Status {
 		ConfState: n.confState.Clone(),
 		Progress:  n.progress,
 	}
+}
+
+// bootstrapPeers builds the bootstrap membership in a deterministic order
+// with identical contexts on every node, so that every founding member
+// appends byte-for-byte identical entries at indexes 1..N. Client addresses
+// are published separately once the cluster runs.
+func bootstrapPeers(initial map[raft.NodeID]string) []raft.Peer {
+	ids := make([]raft.NodeID, 0, len(initial))
+	for id := range initial {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	peers := make([]raft.Peer, 0, len(ids))
+	for _, id := range ids {
+		peers = append(peers, raft.Peer{ID: id, Context: encodeMemberContext(memberContext{RaftAddress: initial[id]})})
+	}
+	return peers
 }

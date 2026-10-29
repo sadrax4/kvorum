@@ -57,6 +57,12 @@ The leader tracks each follower in one of three states:
   `MaxInflightMsgs` messages outstanding;
 - **snapshot**: a snapshot is being installed and nothing else is sent.
 
+A follower first checks that the entries of an AppendEntries are contiguous
+from the previous index with non-decreasing terms, and refuses an append
+that would contradict one of its committed entries. A correct leader never
+sends either, so both are logged as errors; the point is that a buggy or
+hostile peer cannot crash the node through the unauthenticated Raft port.
+
 Rejections carry a hint. The follower reports the term of its conflicting
 entry and the first index of that term; the leader skips its own entries of
 that term in one step instead of decrementing by one per round trip
@@ -115,12 +121,16 @@ win an election.
 ## Linearizable reads
 
 `handleReadIndex` on the leader records the commit index for the request,
-acknowledges it itself, and broadcasts a heartbeat carrying the request's
-context. Each heartbeat carries the newest pending context so that
-acknowledgements keep flowing even if the original round was lost. When a
-quorum of *voters* has acknowledged, every request queued up to that one is
-released (`readOnly.advance`): an acknowledgement for a later request also
-proves leadership for earlier ones.
+acknowledges it itself, and broadcasts a heartbeat carrying a key made of
+the requester's id and the request's context, so that two members using the
+same context bytes (for example per-node counters) never share an entry.
+Each heartbeat carries the newest pending key so that acknowledgements keep
+flowing even if the original round was lost. When a quorum of *voters* has
+acknowledged, every request queued up to that one is released
+(`readOnly.advance`): an acknowledgement for a later request also proves
+leadership for earlier ones. A membership change re-evaluates the pending
+requests against the new quorum, which matters when the cluster shrinks to
+a single voter and no heartbeat response will ever arrive.
 
 Requests that arrive before the leader has committed in its term are held
 back, and a single-voter cluster answers immediately.
@@ -134,8 +144,9 @@ ignores contexts it does not recognise.
 
 `transferLeader` records the target, resets the election timer, and either
 sends `MsgTimeoutNow` at once (target up to date) or sends it as soon as the
-target's acknowledgement shows it has caught up. Proposals are refused in
-the meantime. If the transfer does not finish within an election timeout it
+target's acknowledgement shows it has caught up; while the target is up to
+date the request is repeated on every heartbeat so that a lost message does
+not stall the transfer. Proposals are refused in the meantime. If the transfer does not finish within an election timeout it
 is abandoned, which `TestLeaderTransfer/times_out_when_target_unreachable`
 checks.
 

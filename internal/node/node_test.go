@@ -111,3 +111,27 @@ func TestConfigDefaultsAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestBootstrapPeersDeterministic(t *testing.T) {
+	t.Parallel()
+	initial := map[raft.NodeID]string{3: "c", 1: "a", 2: "b"}
+	first := bootstrapPeers(initial)
+	for range 20 {
+		again := bootstrapPeers(initial)
+		if len(again) != 3 {
+			t.Fatalf("got %d peers", len(again))
+		}
+		for i := range again {
+			if again[i].ID != first[i].ID || !bytes.Equal(again[i].Context, first[i].Context) {
+				t.Fatalf("bootstrap peers differ between calls: %v vs %v", again, first)
+			}
+		}
+	}
+	if first[0].ID != 1 || first[1].ID != 2 || first[2].ID != 3 {
+		t.Fatalf("peers not sorted: %v", first)
+	}
+	mc, err := decodeMemberContext(first[2].Context)
+	if err != nil || mc.RaftAddress != "c" || mc.ClientAddress != "" {
+		t.Fatalf("context = %+v, %v", mc, err)
+	}
+}

@@ -1,0 +1,20 @@
+# Binaries
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Data directories created by local runs
+/data/
+/deploy/data/
+
+# Coverage and profiling output
+coverage.*
+*.prof
+*.pprof
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store

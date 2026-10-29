@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package kvorum.raft.v1;
+
+option go_package = "github.com/sadrax4/kvorum/api/raftpb;raftpb";
+
+// RaftService carries Raft messages between cluster members. It is an
+// internal API: clients never talk to it.
+service RaftService {
+  // Step delivers a single Raft message to the receiving node.
+  rpc Step(StepRequest) returns (StepResponse);
+  // InstallSnapshot streams a snapshot to a follower. The first chunk carries
+  // the MsgSnap message header (without data); subsequent chunks carry the
+  // snapshot payload in order.
+  rpc InstallSnapshot(stream InstallSnapshotRequest) returns (InstallSnapshotResponse);
+}
+
+message Entry {
+  uint64 index = 1;
+  uint64 term = 2;
+  uint32 type = 3;
+  bytes data = 4;
+}
+
+message ConfState {
+  repeated uint64 voters = 1;
+  repeated uint64 learners = 2;
+}
+
+message SnapshotMeta {
+  uint64 index = 1;
+  uint64 term = 2;
+  ConfState conf_state = 3;
+}
+
+// Message mirrors raft.Message. Field semantics are documented there.
+message Message {
+  uint32 type = 1;
+  uint64 from = 2;
+  uint64 to = 3;
+  uint64 term = 4;
+
+  uint64 last_log_index = 5;
+  uint64 last_log_term = 6;
+
+  uint64 prev_log_index = 7;
+  uint64 prev_log_term = 8;
+  repeated Entry entries = 9;
+  uint64 commit = 10;
+
+  bool reject = 11;
+  uint64 match_index = 12;
+  uint64 reject_hint = 13;
+  uint64 conflict_term = 14;
+  uint64 conflict_index = 15;
+
+  // snapshot_meta is set for MsgSnap; the payload travels in InstallSnapshot
+  // chunks.
+  SnapshotMeta snapshot_meta = 16;
+
+  bytes context = 17;
+  uint64 read_index = 18;
+  bool transfer = 19;
+}
+
+message StepRequest {
+  Message message = 1;
+}
+
+message StepResponse {}
+
+message InstallSnapshotRequest {
+  oneof payload {
+    Message header = 1;
+    bytes data = 2;
+  }
+}
+
+message InstallSnapshotResponse {}

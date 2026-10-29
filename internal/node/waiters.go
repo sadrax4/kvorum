@@ -79,3 +79,10 @@ type snapshotResult struct {
 	index raft.Index
 	err   error
 }
+
+// publishResult reports the outcome of a follower's attempt to publish its
+// client address through the leader.
+type publishResult struct {
+	term raft.Term
+	ok   bool
+}

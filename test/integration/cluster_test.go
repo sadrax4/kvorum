@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/sadrax4/kvorum/api/kvorumpb"
+	"github.com/sadrax4/kvorum/client"
 	"github.com/sadrax4/kvorum/internal/node"
 	"github.com/sadrax4/kvorum/internal/server"
 	"github.com/sadrax4/kvorum/internal/telemetry"
@@ -620,4 +621,66 @@ func TestGracefulStopHandsOverLeadership(t *testing.T) {
 		t.Fatalf("failover after graceful stop took %s", elapsed)
 	}
 	c.put(ctx, "k2", "v2")
+}
+
+func TestClientConcurrentWritesAndPublishedAddresses(t *testing.T) {
+	c := newCluster(t, 3, clusterOptions{})
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	lead := c.waitLeader()
+
+	// Every member publishes its client address, leader and followers alike.
+	eventually(t, 10*time.Second, func() error {
+		members, err := lead.admin.ListMembers(ctx, &kvorumpb.ListMembersRequest{})
+		if err != nil {
+			return err
+		}
+		for _, m := range members.Members {
+			if m.ClientAddress != c.client[raft.NodeID(m.Id)] {
+				return fmt.Errorf("member %d has client address %q", m.Id, m.ClientAddress)
+			}
+		}
+		return nil
+	})
+
+	// Concurrent writes through one client must all succeed: each in-flight
+	// write uses its own exactly-once session.
+	endpoints := make([]string, 0, 3)
+	for id := raft.NodeID(1); id <= 3; id++ {
+		endpoints = append(endpoints, c.client[id])
+	}
+	cl, err := client.New(client.Config{Endpoints: endpoints, Logger: testLogger(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+
+	const workers, perWorker = 16, 25
+	var wg sync.WaitGroup
+	errs := make(chan error, workers*perWorker)
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range perWorker {
+				key := fmt.Appendf(nil, "concurrent/%d/%d", w, i)
+				if _, err := cl.Put(ctx, key, []byte("v")); err != nil {
+					errs <- fmt.Errorf("worker %d write %d: %w", w, i, err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	res, err := cl.Scan(ctx, []byte("concurrent/"), nil, client.WithPrefix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.KVs) != workers*perWorker {
+		t.Fatalf("scan found %d keys, want %d", len(res.KVs), workers*perWorker)
+	}
 }

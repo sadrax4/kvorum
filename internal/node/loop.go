@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -51,6 +52,11 @@ func (n *Node) run() {
 		case req := <-n.snapshotC:
 			idx, err := n.takeSnapshot()
 			req.resC <- snapshotResult{index: idx, err: err}
+		case r := <-n.publishC:
+			n.publishInFlight = false
+			if r.ok {
+				n.publishedAt = r.term
+			}
 		case <-n.stopC:
 			return
 		}
@@ -193,26 +199,46 @@ func (n *Node) expireWaiters() {
 	n.pendingReads = kept
 }
 
-// maybePublishClientAddress makes a newly elected leader record its client
-// address in the replicated membership table, so that followers can hand
-// out leader hints to clients.
+// maybePublishClientAddress records this node's client address in the
+// replicated membership table once per term, so that every node can hand out
+// leader hints. A leader proposes the entry itself; a follower asks the
+// leader to do it through the transport's Publish RPC.
 func (n *Node) maybePublishClientAddress() {
-	if n.cfg.AdvertiseClient == "" {
+	if n.cfg.AdvertiseClient == "" || n.publishInFlight {
 		return
 	}
 	bs := n.rn.BasicStatus()
-	if bs.State != raft.StateLeader || n.publishedAt == bs.Term {
+	if n.publishedAt == bs.Term || bs.Leader == raft.None {
 		return
 	}
-	// Publish once per term: the local membership table always knows the
-	// node's own address, so it cannot tell whether followers do.
-	n.publishedAt = bs.Term
-	payload := encodeMemberAttrs(memberAttrs{ID: n.cfg.ID, ClientAddress: n.cfg.AdvertiseClient})
-	attrs := encodeEntry(entryKindAttrs, payload)
-	if _, err := n.rn.Propose(attrs); err != nil {
-		n.logger.Debug("could not publish client address", "error", err)
-		n.publishedAt = 0
+	attrs := memberAttrs{ID: n.cfg.ID, ClientAddress: n.cfg.AdvertiseClient}
+	if bs.State == raft.StateLeader {
+		// Publish once per term: the local membership table always knows the
+		// node's own address, so it cannot tell whether followers do.
+		n.publishedAt = bs.Term
+		if _, err := n.rn.Propose(encodeEntry(entryKindAttrs, encodeMemberAttrs(attrs))); err != nil {
+			n.logger.Debug("could not publish client address", "error", err)
+			n.publishedAt = 0
+		}
+		return
 	}
+	if bs.State != raft.StateFollower {
+		return
+	}
+	n.publishInFlight = true
+	leader, term := bs.Leader, bs.Term
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := n.transport.Publish(ctx, leader, n.cfg.AdvertiseClient)
+		if err != nil {
+			n.logger.Debug("could not publish client address through the leader", "leader", leader, "error", err)
+		}
+		select {
+		case n.publishC <- publishResult{term: term, ok: err == nil}:
+		case <-n.stopC:
+		}
+	}()
 }
 
 // processReady drains raft's pending work, honouring the Ready contract.

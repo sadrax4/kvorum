@@ -13,6 +13,10 @@ service RaftService {
   // the MsgSnap message header (without data); subsequent chunks carry the
   // snapshot payload in order.
   rpc InstallSnapshot(stream InstallSnapshotRequest) returns (InstallSnapshotResponse);
+  // Publish hands a member's client-facing address to the leader, which
+  // records it in the replicated membership table so that every node can
+  // redirect clients to whichever member is leader.
+  rpc Publish(PublishRequest) returns (PublishResponse);
 }
 
 message Entry {
@@ -77,3 +81,10 @@ message InstallSnapshotRequest {
 }
 
 message InstallSnapshotResponse {}
+
+message PublishRequest {
+  uint64 member_id = 1;
+  string client_address = 2;
+}
+
+message PublishResponse {}

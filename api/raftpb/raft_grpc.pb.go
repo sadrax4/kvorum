@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	RaftService_Step_FullMethodName            = "/kvorum.raft.v1.RaftService/Step"
 	RaftService_InstallSnapshot_FullMethodName = "/kvorum.raft.v1.RaftService/InstallSnapshot"
+	RaftService_Publish_FullMethodName         = "/kvorum.raft.v1.RaftService/Publish"
 )
 
 // RaftServiceClient is the client API for RaftService service.
@@ -36,6 +37,10 @@ type RaftServiceClient interface {
 	// the MsgSnap message header (without data); subsequent chunks carry the
 	// snapshot payload in order.
 	InstallSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InstallSnapshotRequest, InstallSnapshotResponse], error)
+	// Publish hands a member's client-facing address to the leader, which
+	// records it in the replicated membership table so that every node can
+	// redirect clients to whichever member is leader.
+	Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error)
 }
 
 type raftServiceClient struct {
@@ -69,6 +74,16 @@ func (c *raftServiceClient) InstallSnapshot(ctx context.Context, opts ...grpc.Ca
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RaftService_InstallSnapshotClient = grpc.ClientStreamingClient[InstallSnapshotRequest, InstallSnapshotResponse]
 
+func (c *raftServiceClient) Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PublishResponse)
+	err := c.cc.Invoke(ctx, RaftService_Publish_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftServiceServer is the server API for RaftService service.
 // All implementations must embed UnimplementedRaftServiceServer
 // for forward compatibility.
@@ -82,6 +97,10 @@ type RaftServiceServer interface {
 	// the MsgSnap message header (without data); subsequent chunks carry the
 	// snapshot payload in order.
 	InstallSnapshot(grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]) error
+	// Publish hands a member's client-facing address to the leader, which
+	// records it in the replicated membership table so that every node can
+	// redirect clients to whichever member is leader.
+	Publish(context.Context, *PublishRequest) (*PublishResponse, error)
 	mustEmbedUnimplementedRaftServiceServer()
 }
 
@@ -97,6 +116,9 @@ func (UnimplementedRaftServiceServer) Step(context.Context, *StepRequest) (*Step
 }
 func (UnimplementedRaftServiceServer) InstallSnapshot(grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]) error {
 	return status.Error(codes.Unimplemented, "method InstallSnapshot not implemented")
+}
+func (UnimplementedRaftServiceServer) Publish(context.Context, *PublishRequest) (*PublishResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Publish not implemented")
 }
 func (UnimplementedRaftServiceServer) mustEmbedUnimplementedRaftServiceServer() {}
 func (UnimplementedRaftServiceServer) testEmbeddedByValue()                     {}
@@ -144,6 +166,24 @@ func _RaftService_InstallSnapshot_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RaftService_InstallSnapshotServer = grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]
 
+func _RaftService_Publish_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PublishRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftServiceServer).Publish(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftService_Publish_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftServiceServer).Publish(ctx, req.(*PublishRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftService_ServiceDesc is the grpc.ServiceDesc for RaftService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -154,6 +194,10 @@ var RaftService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Step",
 			Handler:    _RaftService_Step_Handler,
+		},
+		{
+			MethodName: "Publish",
+			Handler:    _RaftService_Publish_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

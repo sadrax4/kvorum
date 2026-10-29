@@ -18,3 +18,7 @@ coverage.*
 .idea/
 .vscode/
 .DS_Store
+
+# Stray binaries built at the repo root
+/kvorum
+/kvorumctl

@@ -1,0 +1,89 @@
+# Three-node kvorum cluster for local experimentation.
+#
+#   docker compose -f deploy/docker-compose.yml up --build -d
+#   docker compose -f deploy/docker-compose.yml exec node1 kvorumctl put greeting hello
+#   docker compose -f deploy/docker-compose.yml exec node2 kvorumctl get greeting
+#
+# Add "--profile monitoring" to also start Prometheus on http://localhost:9090.
+
+x-node: &node
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: kvorum:latest
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/kvorumctl", "--endpoints", "127.0.0.1:2379", "--timeout", "2s", "status"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+    start_period: 5s
+
+services:
+  node1:
+    <<: *node
+    command:
+      - --id=1
+      - --data-dir=/data
+      - --listen-client=0.0.0.0:2379
+      - --listen-raft=0.0.0.0:2380
+      - --listen-http=0.0.0.0:2381
+      - --advertise-client=node1:2379
+      - --advertise-raft=node1:2380
+      - --initial-cluster=1=node1:2380,2=node2:2380,3=node3:2380
+    ports:
+      - "2379:2379"
+      - "2381:2381"
+    volumes:
+      - node1-data:/data
+
+  node2:
+    <<: *node
+    command:
+      - --id=2
+      - --data-dir=/data
+      - --listen-client=0.0.0.0:2379
+      - --listen-raft=0.0.0.0:2380
+      - --listen-http=0.0.0.0:2381
+      - --advertise-client=node2:2379
+      - --advertise-raft=node2:2380
+      - --initial-cluster=1=node1:2380,2=node2:2380,3=node3:2380
+    ports:
+      - "12379:2379"
+      - "12381:2381"
+    volumes:
+      - node2-data:/data
+
+  node3:
+    <<: *node
+    command:
+      - --id=3
+      - --data-dir=/data
+      - --listen-client=0.0.0.0:2379
+      - --listen-raft=0.0.0.0:2380
+      - --listen-http=0.0.0.0:2381
+      - --advertise-client=node3:2379
+      - --advertise-raft=node3:2380
+      - --initial-cluster=1=node1:2380,2=node2:2380,3=node3:2380
+    ports:
+      - "22379:2379"
+      - "22381:2381"
+    volumes:
+      - node3-data:/data
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - node1
+      - node2
+      - node3
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

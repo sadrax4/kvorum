@@ -160,3 +160,19 @@ node from that directory with a fresh `--initial-cluster` that contains only
 itself; the old membership is replaced by the bootstrap entries only when
 the data directory is empty, so for that case delete the `wal/` directory
 and keep `snap/`.
+
+## Reference numbers
+
+Measured with `kvorumctl bench` against `scripts/run-local-cluster.sh` on a
+4-core container that hosts all three nodes and the client:
+
+| Workload | Throughput | p50 | p99 |
+| --- | --- | --- | --- |
+| 1 client, sequential `put` (128 B) | 590 ops/s | 1.5 ms | 5.0 ms |
+| 1 client, sequential linearizable `get` | 1 080 ops/s | 0.87 ms | 2.3 ms |
+| 16 clients, `put` | 1 320 ops/s | 11.7 ms | 21.5 ms |
+| 64 clients, `put` | 1 400 ops/s | 44.7 ms | 66.4 ms |
+
+Expect the single-client latency to track `fsync` latency on the data disk
+(two fsyncs per write) and the throughput ceiling to track available CPU,
+since every Raft message is one gRPC call.

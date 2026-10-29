@@ -112,7 +112,7 @@ Segmented append-only log with CRC-protected records, plus a snapshot store.
 ### API
 
 ```go
-func Open(dir string, opts Options) (*WAL, Replay, error)
+func Open(dir string, opts Options) (*WAL, Replay, error) // Options: SegmentSize, SyncObserver, Logger
 type Replay struct {
     HardState    raft.HardState
     Entries      []raft.Entry      // contiguous, after the latest snapshot marker
@@ -125,7 +125,7 @@ func (w *WAL) Sync() error
 func (w *WAL) Close() error
 
 type Snapshotter struct{ /* ... */ }
-func NewSnapshotter(dir string) (*Snapshotter, error)
+func NewSnapshotter(dir string, logger *slog.Logger) (*Snapshotter, error)
 func (s *Snapshotter) Save(snap raft.Snapshot) error
 func (s *Snapshotter) Load() (raft.Snapshot, error) // ErrNoSnapshot if none
 func (s *Snapshotter) Prune(keep int) error
@@ -212,6 +212,9 @@ type Handler interface {
     ReportUnreachable(id raft.NodeID)
     ReportSnapshot(id raft.NodeID, succeeded bool)
 }
+type Publisher interface { // optional; records client addresses published by followers
+    PublishAttributes(ctx context.Context, id raft.NodeID, clientAddress string) error
+}
 func New(cfg Config) (*Transport, error)
 func (t *Transport) Start() error
 func (t *Transport) Stop()
@@ -219,10 +222,14 @@ func (t *Transport) Send(msgs []raft.Message)
 func (t *Transport) AddPeer(id raft.NodeID, addr string)
 func (t *Transport) RemovePeer(id raft.NodeID)
 func (t *Transport) Address() string
+func (t *Transport) Publish(ctx context.Context, to raft.NodeID, clientAddress string) error
 ```
 
 Inbound messages are validated (`To` must be the local node) and handed to the
-`Handler`. Messages to unknown peers are dropped and counted.
+`Handler`. Messages to unknown peers are dropped and counted. Snapshots are
+sent through a client-streaming `InstallSnapshot` call in chunks; a follower
+publishes its client address to the leader through `Publish`, and the leader
+records it in the replicated membership table.
 
 ## 5. `internal/node` — the runtime
 
@@ -237,7 +244,12 @@ contract above. It also provides:
 - Snapshotting when `applied − snapshotIndex > SnapshotThreshold`, followed
   by `Compact` on the in-memory storage and `ReleaseBefore` on the WAL.
 - Membership bookkeeping: member addresses travel in `ConfChange.Context` and
-  are persisted inside the snapshot envelope alongside the kv payload.
+  are persisted inside the snapshot envelope alongside the kv payload. A node
+  publishes its client address once per term (a leader by proposing an
+  attribute entry, a follower by asking the leader through the transport), so
+  every node can hand out leader hints with an address.
+- Graceful shutdown: a leader hands leadership to its most up-to-date
+  follower before stopping.
 
 ## 6. `internal/server` — client API
 
@@ -269,6 +281,7 @@ subcommand.
 --heartbeat-tick      int      ticks between heartbeats (default 1)
 --log-level           string   debug|info|warn|error (default info)
 --log-format          string   json|text (default json)
+--version                      print version and exit
 ```
 
 Every flag can also be set through an environment variable named

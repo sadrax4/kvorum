@@ -145,9 +145,12 @@ func (n *Node) installSnapshot(snap raft.Snapshot) error {
 	n.syncPeers()
 	n.failWaiters(ErrProposalLost)
 	n.metrics.RaftSnapshots.WithLabelValues("installed").Inc()
-	if err := n.compactTo(snap.Meta.Index); err != nil {
-		return err
+	// The in-memory log already starts after the snapshot; release the WAL
+	// segments that only hold entries the snapshot has superseded.
+	if err := n.wal.ReleaseBefore(snap.Meta.Index); err != nil {
+		return fmt.Errorf("node: release wal before %d: %w", snap.Meta.Index, err)
 	}
+	n.metrics.WALSegments.Set(float64(n.wal.Stats().Segments))
 	return n.snapshotter.Prune(2)
 }
 

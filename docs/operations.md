@@ -21,6 +21,11 @@ kvorum \
   --initial-cluster 1=node1:2380,2=node2:2380,3=node3:2380
 ```
 
+The advertised addresses matter: a wildcard listen address such as
+`0.0.0.0:2379` is never advertised, so without `--advertise-client` other
+nodes cannot include this node in leader hints and clients fall back to
+trying their configured endpoints in turn.
+
 `--initial-cluster` lists every founding member with its Raft address. All
 founding members must be started with the same list; each one writes the
 membership entries into its own log at bootstrap, and the logs are
@@ -127,8 +132,10 @@ snapshot threshold bounds.
   term, commit and applied indexes, leader changes, proposals by outcome,
   messages by type, Ready and apply latency, WAL fsync latency, request
   latency by operation, watchers, transport failures, and build info.
-- `/readyz` returns 200 only when the node knows a leader; `/healthz`
-  always returns 200 while the process serves.
+- `/readyz` returns 200 only when the node is running and knows a leader;
+  `/healthz` returns 503 once the node has stopped because of a storage
+  error, so a supervisor restarts the process instead of leaving a member
+  that looks alive but cannot write.
 - `/status` returns the same information as `kvorumctl status` as JSON.
 - Logs are structured (`--log-format json|text`, `--log-level`). Leader
   changes, membership changes, snapshots, and shutdown are logged at info;
@@ -149,6 +156,8 @@ p99 above a few milliseconds.
 | A majority is down | Writes and linearizable reads fail with `UNAVAILABLE` until a quorum returns. Stale reads keep working. |
 | A node crashes | On restart it replays its WAL and snapshot, rejoins, and catches up from the leader, through a snapshot if needed. |
 | A node's disk is corrupt | The node refuses to start (`wal: corrupt log`). Delete its data directory and re-add it as a fresh learner. |
+| A write to the log or a snapshot fails at runtime | The node stops serving (`/healthz` 503, process exits non-zero) rather than acknowledge writes it cannot persist; a failed snapshot is retried with backoff. |
+| Membership calls are retried after a timeout | Safe: adding a member that already has the role, promoting a voter, or removing a non-member succeeds without a change. |
 | Clock skew | Irrelevant: kvorum uses no wall-clock assumptions for safety. |
 
 ## Backups

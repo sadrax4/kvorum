@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/sadrax4/kvorum/api/kvorumpb"
 )
 
@@ -26,10 +29,7 @@ const watchBuffer = 128
 // the stream are reported through the channel.
 func (c *Client) Watch(ctx context.Context, key []byte, opts ...WatchOption) (<-chan WatchEvent, error) {
 	o := applyWatchOptions(opts)
-	rangeEnd := o.rangeEnd
-	if o.prefix {
-		rangeEnd = PrefixEnd(key)
-	}
+	rangeEnd := watchRangeEnd(key, o)
 
 	c.mu.Lock()
 	if c.closed {
@@ -157,5 +157,29 @@ func (c *Client) finishWatch(ch chan<- WatchEvent, err error) {
 // stream. A clean end of stream (io.EOF) means the server released the watch,
 // for example because the watcher overflowed, and the watch is re-registered.
 func isReconnectable(err error) bool {
-	return errors.Is(err, io.EOF) || isRetryable(err)
+	if errors.Is(err, io.EOF) || isRetryable(err) {
+		return true
+	}
+	// ResourceExhausted is how the server ends a watch whose events could
+	// not be delivered in time (or that was reset by a snapshot restore);
+	// re-registering is the documented recovery.
+	return status.Code(err) == codes.ResourceExhausted
+}
+
+// unboundedRangeEnd is the wire convention for "every key from the start
+// key onwards": a range end of a single zero byte, which no real key can be
+// smaller than.
+var unboundedRangeEnd = []byte{0}
+
+// watchRangeEnd resolves the range end of a watch. A prefix whose PrefixEnd
+// is unbounded (an empty prefix or one made only of 0xff bytes) must not
+// degrade into a single-key watch, so it is sent as the unbounded marker.
+func watchRangeEnd(key []byte, o watchOptions) []byte {
+	if !o.prefix {
+		return o.rangeEnd
+	}
+	if end := PrefixEnd(key); end != nil {
+		return end
+	}
+	return unboundedRangeEnd
 }

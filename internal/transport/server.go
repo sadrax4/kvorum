@@ -30,6 +30,10 @@ const (
 	keepaliveMinTime = 5 * time.Second
 )
 
+// maxPublishedAddress bounds the address a peer may publish; anything longer
+// is neither a valid host:port nor welcome in the replicated log.
+const maxPublishedAddress = 256
+
 // raftServer implements raftpb.RaftServiceServer on behalf of a Transport.
 type raftServer struct {
 	raftpb.UnimplementedRaftServiceServer
@@ -76,6 +80,9 @@ func (s *raftServer) Step(ctx context.Context, req *raftpb.StepRequest) (*raftpb
 func (s *raftServer) Publish(ctx context.Context, req *raftpb.PublishRequest) (*raftpb.PublishResponse, error) {
 	if req.GetMemberId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "member id must not be zero")
+	}
+	if len(req.GetClientAddress()) > maxPublishedAddress {
+		return nil, status.Errorf(codes.InvalidArgument, "client address exceeds %d bytes", maxPublishedAddress)
 	}
 	if s.t.cfg.Publisher == nil {
 		return nil, status.Error(codes.Unimplemented, "attribute publishing is not enabled")

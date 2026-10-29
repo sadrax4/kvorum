@@ -211,7 +211,11 @@ func (p *peer) sendSnapshot(m raft.Message) {
 		defer p.t.wg.Done()
 		defer p.snapshotInFlight.Store(false)
 		ok := p.streamSnapshot(m)
-		if p.ctx.Err() != nil && !ok {
+		// A stream aborted because the whole transport is stopping has no
+		// one left to report to; one aborted because this peer was closed
+		// (for example its address changed) must still be reported, or the
+		// leader would wait for a snapshot acknowledgement forever.
+		if p.t.ctx.Err() != nil && !ok {
 			return
 		}
 		p.t.handler.ReportSnapshot(p.id, ok)

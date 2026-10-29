@@ -60,10 +60,22 @@ func (n *Node) LinearizableRead(ctx context.Context) error {
 	}
 }
 
-// AddMember adds a voter or learner to the cluster.
+// AddMember adds a voter or learner to the cluster. Adding a member that
+// already has the requested role succeeds without a change, which makes a
+// retry after an ambiguous failure safe.
 func (n *Node) AddMember(ctx context.Context, m Member) error {
 	if m.ID == raft.None || m.RaftAddress == "" {
 		return fmt.Errorf("%w: id and raft address are required", ErrInvalidMember)
+	}
+	if len(m.RaftAddress) > maxAddressLength || len(m.ClientAddress) > maxAddressLength {
+		return fmt.Errorf("%w: addresses must be at most %d bytes", ErrInvalidMember, maxAddressLength)
+	}
+	n.mu.RLock()
+	cs := n.confState
+	alreadyThere := (m.Learner && cs.IsLearner(m.ID)) || (!m.Learner && cs.IsVoter(m.ID))
+	n.mu.RUnlock()
+	if alreadyThere {
+		return nil
 	}
 	typ := raft.ConfChangeAddVoter
 	if m.Learner {
@@ -76,11 +88,15 @@ func (n *Node) AddMember(ctx context.Context, m Member) error {
 	})
 }
 
-// PromoteMember turns a learner into a voter.
+// PromoteMember turns a learner into a voter. Promoting a node that is
+// already a voter succeeds without a change.
 func (n *Node) PromoteMember(ctx context.Context, id raft.NodeID) error {
 	n.mu.RLock()
-	isLearner := n.confState.IsLearner(id)
+	isLearner, isVoter := n.confState.IsLearner(id), n.confState.IsVoter(id)
 	n.mu.RUnlock()
+	if isVoter {
+		return nil
+	}
 	if !isLearner {
 		return fmt.Errorf("%w: node %d is not a learner", ErrInvalidMember, id)
 	}
@@ -89,9 +105,16 @@ func (n *Node) PromoteMember(ctx context.Context, id raft.NodeID) error {
 
 // RemoveMember removes a member from the cluster. Removing the local node is
 // allowed; the node steps down and Removed is closed once the change applies.
+// Removing a node that is not a member succeeds without a change.
 func (n *Node) RemoveMember(ctx context.Context, id raft.NodeID) error {
 	if id == raft.None {
 		return fmt.Errorf("%w: id is required", ErrInvalidMember)
+	}
+	n.mu.RLock()
+	member := n.confState.Contains(id)
+	n.mu.RUnlock()
+	if !member {
+		return nil
 	}
 	return n.proposeConfChange(ctx, raft.ConfChange{Type: raft.ConfChangeRemoveNode, NodeID: id})
 }

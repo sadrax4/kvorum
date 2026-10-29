@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strconv"
@@ -106,18 +107,30 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if o.advertiseClient == "" {
-		o.advertiseClient = o.listenClient
-	}
-	if o.advertiseRaft == "" {
-		o.advertiseRaft = o.listenRaft
-	}
-
 	logger, err := telemetry.NewLogger(o.logLevel, o.logFormat, os.Stderr)
 	if err != nil {
 		return err
 	}
 	logger.Info("starting kvorum", "version", telemetry.Version, "commit", telemetry.Commit, "id", o.id, "data_dir", o.dataDir)
+
+	// A wildcard listen address is useless to other machines, so it is never
+	// advertised. Without an advertised client address followers cannot
+	// include this node's address in leader hints; clients then fall back to
+	// trying their configured endpoints in turn.
+	if o.advertiseClient == "" {
+		if isWildcard(o.listenClient) {
+			logger.Warn("no --advertise-client and --listen-client is a wildcard address; leader hints will carry no address")
+		} else {
+			o.advertiseClient = o.listenClient
+		}
+	}
+	if o.advertiseRaft == "" {
+		if isWildcard(o.listenRaft) {
+			logger.Warn("no --advertise-raft and --listen-raft is a wildcard address; peers must learn this node's address from --initial-cluster or member add")
+		} else {
+			o.advertiseRaft = o.listenRaft
+		}
+	}
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
@@ -164,23 +177,48 @@ func run(args []string) error {
 
 	sigC := make(chan os.Signal, 1)
 	signal.Notify(sigC, syscall.SIGINT, syscall.SIGTERM)
+	var fatal error
 	select {
 	case sig := <-sigC:
 		logger.Info("received signal; shutting down", "signal", sig.String())
 	case <-n.Removed():
 		logger.Warn("node was removed from the cluster; shutting down")
+	case <-n.Done():
+		fatal = n.Err()
+		logger.Error("node stopped on its own; shutting down", "error", fatal)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Stop(ctx); err != nil {
+	// Each stage gets its own budget: draining client streams must not eat
+	// the time the node needs to hand leadership over.
+	serverCtx, cancelServer := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelServer()
+	if err := srv.Stop(serverCtx); err != nil {
 		logger.Warn("server shutdown", "error", err)
 	}
-	if err := n.Stop(ctx); err != nil {
+	nodeCtx, cancelNode := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelNode()
+	if err := n.Stop(nodeCtx); err != nil {
 		logger.Warn("node shutdown", "error", err)
 	}
 	logger.Info("shutdown complete")
+	if fatal != nil {
+		return fmt.Errorf("node failed: %w", fatal)
+	}
 	return nil
+}
+
+// isWildcard reports whether a listen address binds every interface (an
+// empty or unspecified host), which must not be advertised to other hosts.
+func isWildcard(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 func stopNode(n *node.Node, logger interface{ Warn(string, ...any) }) {

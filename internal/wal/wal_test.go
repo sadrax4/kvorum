@@ -379,3 +379,106 @@ func mustOpenB(b *testing.B, dir string) (*WAL, Replay) {
 	}
 	return w, rp
 }
+
+func TestEmptyActiveSegmentIsReinitialised(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w, _ := mustOpen(t, dir, Options{})
+	if err := w.Save(raft.HardState{Term: 2, Vote: 1, Commit: 3}, entries(1, 3, 2), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a crash right after the next segment was created but before
+	// its header was written.
+	if err := os.WriteFile(filepath.Join(dir, segmentName(2)), nil, filePerm); err != nil {
+		t.Fatal(err)
+	}
+	w, rp := mustOpen(t, dir, Options{})
+	if got := indexes(rp.Entries); got != indexes(entries(1, 3, 2)) {
+		t.Fatalf("entries = %s", got)
+	}
+	if err := w.Save(raft.HardState{}, entries(4, 4, 2), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The segment written after recovery carries a proper header and the
+	// hard state, so a further restart reads everything back.
+	w, rp = mustOpen(t, dir, Options{})
+	defer w.Close()
+	if got := indexes(rp.Entries); got != indexes(entries(1, 4, 2)) {
+		t.Fatalf("entries after re-init = %s", got)
+	}
+	if rp.HardState != (raft.HardState{Term: 2, Vote: 1, Commit: 3}) {
+		t.Fatalf("hard state after re-init = %+v", rp.HardState)
+	}
+}
+
+func TestCorruptionInsideNewestSegmentIsNotTruncated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w, _ := mustOpen(t, dir, Options{})
+	for i := raft.Index(1); i <= 10; i++ {
+		if err := w.Save(raft.HardState{Term: 1, Commit: i}, entries(i, i, 1), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Save(raft.HardState{Term: 5, Vote: 3, Commit: 10}, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A bit flip in the middle of the only segment: valid, acknowledged
+	// records follow it, so this is corruption and must not be silently
+	// truncated away (that would forget entries and the vote).
+	path := filepath.Join(dir, segmentName(1))
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b[len(b)/2] ^= 0x01
+	if err := os.WriteFile(path, b, filePerm); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Open(dir, Options{}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("open with mid-segment corruption: err = %v, want ErrCorrupt", err)
+	}
+}
+
+func TestZeroFilledTailIsTruncated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	w, _ := mustOpen(t, dir, Options{})
+	if err := w.Save(raft.HardState{Term: 1, Commit: 2}, entries(1, 2, 1), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A crash after the file system extended the file but before the data
+	// reached it leaves a zero-filled tail: a complete-looking record with a
+	// bad checksum followed by zeros.
+	path := filepath.Join(dir, segmentName(1))
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, filePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := appendRecord(nil, recordEntry, encodeEntry(raft.Entry{Index: 3, Term: 1, Data: make([]byte, 100)}))
+	rec[len(rec)-1] ^= 0xFF // corrupt the body
+	if _, err := f.Write(append(rec, make([]byte, 2*sectorSize)...)); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	w, rp := mustOpen(t, dir, Options{})
+	defer w.Close()
+	if got := indexes(rp.Entries); got != indexes(entries(1, 2, 1)) {
+		t.Fatalf("entries after zero-filled tail = %s", got)
+	}
+	if err := w.Save(raft.HardState{}, entries(3, 3, 1), true); err != nil {
+		t.Fatal(err)
+	}
+}

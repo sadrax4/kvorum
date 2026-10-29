@@ -185,6 +185,12 @@ func (t *Transport) Send(msgs []raft.Message) {
 				t.logger.Debug("dropping message to unknown peer",
 					slog.Uint64("to", uint64(m.To)), slog.String("type", m.Type.String()))
 			}
+			if m.Type == raft.MsgSnap {
+				// Raft pauses replication to a follower until it hears how
+				// the snapshot went; a snapshot that cannot be sent at all
+				// counts as a failed transfer.
+				t.handler.ReportSnapshot(m.To, false)
+			}
 			continue
 		}
 		if m.Type == raft.MsgSnap {

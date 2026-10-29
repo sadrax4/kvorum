@@ -55,3 +55,19 @@ func TestPrefixEndCoversPrefixRange(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchRangeEnd(t *testing.T) {
+	t.Parallel()
+	if got := watchRangeEnd([]byte("app/"), watchOptions{prefix: true}); string(got) != "app0" {
+		t.Fatalf("prefix range end = %q", got)
+	}
+	if got := watchRangeEnd([]byte{0xff}, watchOptions{prefix: true}); string(got) != "\x00" {
+		t.Fatalf("all-0xff prefix must watch to the end of the keyspace, got %q", got)
+	}
+	if got := watchRangeEnd([]byte("k"), watchOptions{rangeEnd: []byte("z")}); string(got) != "z" {
+		t.Fatalf("explicit range end = %q", got)
+	}
+	if got := watchRangeEnd([]byte("k"), watchOptions{}); got != nil {
+		t.Fatalf("single key watch should have no range end, got %q", got)
+	}
+}

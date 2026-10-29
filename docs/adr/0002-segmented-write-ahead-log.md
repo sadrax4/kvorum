@@ -24,8 +24,14 @@ marker covers their entries; every new segment starts with the current hard
 state and the latest marker so that older segments are self-contained.
 
 Only the newest segment may end with a torn record, which is truncated on
-open; corruption anywhere else refuses to start, because silently skipping a
-record could violate the acknowledgement guarantee.
+open. A record is considered torn when the file ends inside it or when the
+file from that point on contains a zero-filled sector, which is what an
+interrupted write leaves behind; a checksum failure followed by other data
+is corruption and refuses to start, because silently skipping a record could
+violate the acknowledgement guarantee. An empty segment left by a crash
+between creating the file and writing its header is re-initialised, and a
+snapshot file whose marker never reached the log gets the marker written on
+the next open.
 
 The in-memory `raft.MemoryStorage` is rebuilt from the log on start-up and
 serves all reads; the log is written, never read, while the node runs.

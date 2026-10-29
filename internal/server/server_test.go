@@ -172,8 +172,13 @@ func TestKVServiceEndToEnd(t *testing.T) {
 	if _, err := admin.AddMember(ctx, &kvorumpb.AddMemberRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("add member without data: %v", err)
 	}
-	if _, err := admin.RemoveMember(ctx, &kvorumpb.RemoveMemberRequest{Id: 9}); status.Code(err) != codes.FailedPrecondition {
+	// Removing a node that is not a member is idempotent; promoting one is
+	// an error because there is nothing to promote.
+	if _, err := admin.RemoveMember(ctx, &kvorumpb.RemoveMemberRequest{Id: 9}); err != nil {
 		t.Fatalf("remove unknown member: %v", err)
+	}
+	if _, err := admin.PromoteMember(ctx, &kvorumpb.PromoteMemberRequest{Id: 9}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("promote unknown member: %v", err)
 	}
 	if _, err := admin.TransferLeadership(ctx, &kvorumpb.TransferLeadershipRequest{TargetId: 9}); status.Code(err) != codes.NotFound {
 		t.Fatalf("transfer to unknown: %v", err)
@@ -231,6 +236,7 @@ func TestToStatusMapping(t *testing.T) {
 		{node.ErrNotLeader, codes.Unavailable},
 		{node.ErrNoLeader, codes.Unavailable},
 		{node.ErrProposalLost, codes.Unavailable},
+		{node.ErrLeadershipTransferring, codes.Unavailable},
 		{node.ErrStopped, codes.Unavailable},
 		{raft.ErrConfChangePending, codes.Unavailable},
 		{node.ErrQueueFull, codes.ResourceExhausted},
@@ -260,6 +266,11 @@ func TestToStatusMapping(t *testing.T) {
 	}
 	if !hinted {
 		t.Fatalf("no leader hint in %v", st.Details())
+	}
+	// A transfer in progress must not point clients back at this node.
+	st, _ = status.FromError(s.toStatus(node.ErrLeadershipTransferring))
+	if len(st.Details()) != 0 {
+		t.Fatalf("transfer error carried a hint: %v", st.Details())
 	}
 }
 

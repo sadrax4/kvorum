@@ -46,10 +46,11 @@ func (p *proposal) resolve(res kv.Result, err error) {
 
 // readWaiter is a linearizable read barrier in flight.
 type readWaiter struct {
-	ctx   context.Context
-	id    uint64
-	index raft.Index // set once the ReadState arrives
-	resC  chan error
+	ctx    context.Context
+	id     uint64
+	leader raft.NodeID // the leader the request was sent to
+	index  raft.Index  // set once the ReadState arrives
+	resC   chan error
 }
 
 func (w *readWaiter) resolve(err error) {

@@ -114,11 +114,24 @@ func Open(dir string, opts Options) (*WAL, Replay, error) {
 	w.hardState = replay.HardState
 	w.snapshotMeta = replay.SnapshotMeta
 
-	if len(segs) == 0 {
+	switch {
+	case len(segs) == 0:
 		if err := w.cutLocked(); err != nil {
 			return nil, Replay{}, err
 		}
-	} else {
+	case segs[len(segs)-1].size == 0:
+		// A crash between creating a segment and writing its header leaves
+		// an empty file. Re-initialise it instead of appending records to a
+		// header-less segment, which would be unreadable on the next open.
+		w.logger.Warn("re-initialising empty active segment left by a crash", "seq", segs[len(segs)-1].seq)
+		w.segments = segs[:len(segs)-1]
+		if err := os.Remove(segs[len(segs)-1].path); err != nil {
+			return nil, Replay{}, fmt.Errorf("wal: remove empty segment: %w", err)
+		}
+		if err := w.cutLocked(); err != nil {
+			return nil, Replay{}, err
+		}
+	default:
 		active := segs[len(segs)-1]
 		f, err := os.OpenFile(active.path, os.O_WRONLY|os.O_APPEND, filePerm)
 		if err != nil {
@@ -195,7 +208,7 @@ func (w *WAL) replaySegment(seg *segment, last bool, rp *Replay) error {
 			break
 		}
 		if err != nil {
-			if !last {
+			if !last || !isTornTail(seg.path, offset, err) {
 				return fmt.Errorf("%w: %s at offset %d: %w", ErrCorrupt, filepath.Base(seg.path), offset, err)
 			}
 			w.logger.Warn("truncating torn tail of newest segment", "file", filepath.Base(seg.path), "offset", offset, "error", err)
@@ -278,6 +291,52 @@ func applyRecord(typ byte, payload []byte, seg *segment, rp *Replay) error {
 		return fmt.Errorf("unknown record type %#x", typ)
 	}
 	return nil
+}
+
+// sectorSize is the granularity at which a torn write leaves zero-filled
+// space behind on common file systems.
+const sectorSize = 512
+
+// isTornTail decides whether an unreadable record at offset in the newest
+// segment is the signature of a crash during a write, which is safe to
+// truncate, or of corruption of data that was once durable, which is not.
+// A record cut short by the end of the file is a torn write. A record that
+// is complete but fails its checksum is treated as torn only if the file
+// from that point on contains a zero-filled sector, which is what a partial
+// write leaves behind; otherwise valid data may follow and nothing is
+// discarded.
+func isTornTail(path string, offset int64, err error) bool {
+	if errors.Is(err, errTornRecord) {
+		return true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close() //nolint:errcheck // read-only file
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return false
+	}
+	buf := make([]byte, sectorSize)
+	for {
+		n, err := io.ReadFull(f, buf)
+		if n == 0 {
+			return false
+		}
+		allZero := true
+		for _, b := range buf[:n] {
+			if b != 0 {
+				allZero = false
+				break
+			}
+		}
+		if allZero {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+	}
 }
 
 // dropThrough removes entries with index at or below idx.

@@ -152,6 +152,7 @@ type Node struct {
 	reportC   chan report
 	transferC chan *transferReq
 	snapshotC chan *snapshotReq
+	publishC  chan publishResult
 
 	// State owned by the run loop.
 	waiters      map[raft.Index]*proposal
@@ -159,7 +160,11 @@ type Node struct {
 	pendingReads []*readWaiter
 	readSeq      uint64
 	ticks        uint64
-	publishedAt  raft.Term // term in which this leader published its client address
+	// publishedAt is the term in which this node last published its client
+	// address (by proposing it as leader, or through the leader as a
+	// follower); publishInFlight guards the follower's asynchronous RPC.
+	publishedAt     raft.Term
+	publishInFlight bool
 
 	removedOnce sync.Once
 	removedC    chan struct{}
@@ -188,6 +193,7 @@ func Open(c Config) (*Node, error) {
 		reportC:     make(chan report, 1024),
 		transferC:   make(chan *transferReq),
 		snapshotC:   make(chan *snapshotReq),
+		publishC:    make(chan publishResult, 1),
 		waiters:     make(map[raft.Index]*proposal),
 		readWaiters: make(map[uint64]*readWaiter),
 		removedC:    make(chan struct{}),
@@ -248,6 +254,7 @@ func Open(c Config) (*Node, error) {
 		LocalID:       cfg.ID,
 		ListenAddress: cfg.ListenRaft,
 		Handler:       (*transportHandler)(n),
+		Publisher:     (*attributePublisher)(n),
 		Logger:        n.logger.With("component", "transport"),
 		Metrics:       &transportMetrics{m: n.metrics},
 	})

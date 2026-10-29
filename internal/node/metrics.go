@@ -85,6 +85,19 @@ func (h *transportHandler) ReportSnapshot(id raft.NodeID, succeeded bool) {
 	}
 }
 
+// attributePublisher is the Node's implementation of transport.Publisher.
+type attributePublisher Node
+
+// PublishAttributes records a member's client address in the replicated
+// membership table. It succeeds only on the leader.
+func (p *attributePublisher) PublishAttributes(ctx context.Context, id raft.NodeID, clientAddress string) error {
+	n := (*Node)(p)
+	prop := newProposal(ctx, proposalAttrs)
+	prop.data = encodeEntry(entryKindAttrs, encodeMemberAttrs(memberAttrs{ID: id, ClientAddress: clientAddress}))
+	_, err := n.await(prop)
+	return err
+}
+
 // refreshStatusLocked mirrors the raft status into the fields read by other
 // goroutines and into the metrics. Callers hold n.mu.
 func (n *Node) refreshStatusLocked(bs raft.BasicStatus) {

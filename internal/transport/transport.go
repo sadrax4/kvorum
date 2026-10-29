@@ -21,6 +21,12 @@ const (
 	stopGracePeriod = time.Second
 )
 
+// Publisher is implemented by the node to record attributes that a member
+// publishes through the transport, such as its client address.
+type Publisher interface {
+	PublishAttributes(ctx context.Context, id raft.NodeID, clientAddress string) error
+}
+
 // Transport exchanges Raft messages with the other members of the cluster.
 // Create one with [New]; all methods are safe for concurrent use.
 type Transport struct {
@@ -258,4 +264,31 @@ func (t *Transport) requestContext(ctx context.Context) (context.Context, contex
 		stop()
 		cancel()
 	}
+}
+
+// Publish sends this node's client address to the peer with the given id,
+// which is expected to be the leader. It blocks until the peer answers or
+// ctx expires. It returns ErrStopped after Stop and an error if the peer is
+// unknown.
+func (t *Transport) Publish(ctx context.Context, to raft.NodeID, clientAddress string) error {
+	t.mu.RLock()
+	p, ok := t.peers[to]
+	stopped := t.stopped
+	t.mu.RUnlock()
+	if stopped {
+		return ErrStopped
+	}
+	if !ok {
+		return fmt.Errorf("transport: publish: unknown peer %d", to)
+	}
+	client, err := p.getClient()
+	if err != nil {
+		return fmt.Errorf("transport: publish to %d: %w", to, err)
+	}
+	ctx, cancel := t.requestContext(ctx)
+	defer cancel()
+	if _, err := client.Publish(ctx, &raftpb.PublishRequest{MemberId: uint64(t.cfg.LocalID), ClientAddress: clientAddress}); err != nil {
+		return fmt.Errorf("transport: publish to %d: %w", to, err)
+	}
+	return nil
 }

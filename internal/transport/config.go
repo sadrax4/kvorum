@@ -54,6 +54,9 @@ type Config struct {
 	ListenAddress string
 	// Handler receives inbound messages and delivery feedback.
 	Handler Handler
+	// Publisher receives member attributes published by followers through
+	// the Publish RPC. Nil makes the RPC answer Unimplemented.
+	Publisher Publisher
 	// Logger receives diagnostics. Nil discards them.
 	Logger *slog.Logger
 	// Metrics receives counters. Nil uses [NopMetrics].

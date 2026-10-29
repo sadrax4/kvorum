@@ -71,6 +71,23 @@ func (s *raftServer) Step(ctx context.Context, req *raftpb.StepRequest) (*raftpb
 	return &raftpb.StepResponse{}, nil
 }
 
+// Publish implements raftpb.RaftServiceServer by handing the attributes to
+// the configured Publisher.
+func (s *raftServer) Publish(ctx context.Context, req *raftpb.PublishRequest) (*raftpb.PublishResponse, error) {
+	if req.GetMemberId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "member id must not be zero")
+	}
+	if s.t.cfg.Publisher == nil {
+		return nil, status.Error(codes.Unimplemented, "attribute publishing is not enabled")
+	}
+	ctx, cancel := s.t.requestContext(ctx)
+	defer cancel()
+	if err := s.t.cfg.Publisher.PublishAttributes(ctx, raft.NodeID(req.GetMemberId()), req.GetClientAddress()); err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &raftpb.PublishResponse{}, nil
+}
+
 // InstallSnapshot implements raftpb.RaftServiceServer. It expects a header
 // chunk followed by zero or more data chunks, reassembles the payload within
 // MaxSnapshotSize, and delivers the resulting MsgSnap to the handler.

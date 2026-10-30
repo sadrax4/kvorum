@@ -38,8 +38,18 @@ jobs:
             rm -r "$out"
           done
           (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+      - name: Extract release notes from the changelog
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          awk -v ver="${VERSION#v}" '
+            /^## \[/ { printing = ($2 == "[" ver "]") }
+            printing { print }
+          ' CHANGELOG.md > dist/RELEASE_NOTES.md
+          test -s dist/RELEASE_NOTES.md || echo "Release ${VERSION}" > dist/RELEASE_NOTES.md
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/RELEASE_NOTES.md
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS

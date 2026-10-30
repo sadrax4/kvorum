@@ -1,6 +1,7 @@
 # kvorum
 
 [![CI](https://github.com/sadrax4/kvorum/actions/workflows/ci.yml/badge.svg)](https://github.com/sadrax4/kvorum/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/sadrax4/kvorum)](https://github.com/sadrax4/kvorum/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/sadrax4/kvorum.svg)](https://pkg.go.dev/github.com/sadrax4/kvorum)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/sadrax4/kvorum)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -88,6 +89,24 @@ See [docs/architecture.md](docs/architecture.md) for the package contracts,
 [docs/raft-internals.md](docs/raft-internals.md) for the subtle parts of the
 consensus implementation, and [docs/adr/](docs/adr/) for the decisions and
 their trade-offs.
+
+## Install
+
+Pre-built binaries for Linux and macOS (amd64 and arm64) are attached to
+every [release](https://github.com/sadrax4/kvorum/releases), with a
+`SHA256SUMS` file. The container image is published to GitHub Container
+Registry:
+
+```bash
+docker pull ghcr.io/sadrax4/kvorum:latest
+```
+
+With Go 1.26 or newer installed, the binaries can also be built from source:
+
+```bash
+go install github.com/sadrax4/kvorum/cmd/kvorum@latest
+go install github.com/sadrax4/kvorum/cmd/kvorumctl@latest
+```
 
 ## Quick start
 

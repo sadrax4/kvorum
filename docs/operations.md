@@ -173,7 +173,19 @@ and keep `snap/`.
 ## Reference numbers
 
 Measured with `kvorumctl bench` against `scripts/run-local-cluster.sh` on a
-4-core container that hosts all three nodes and the client:
+4-core container that hosts all three nodes and the client. The first table
+is the current implementation (one streaming RPC per peer); the second is
+the earlier design with one unary RPC per Raft message, kept for comparison.
+
+Streaming transport:
+
+| Workload | Throughput | p50 | p99 |
+| --- | --- | --- | --- |
+| 1 client, sequential `put` (128 B) | 720 ops/s | 1.3 ms | 2.7 ms |
+| 1 client, sequential linearizable `get` | 2 030 ops/s | 0.45 ms | 1.4 ms |
+| 64 clients, `put` | 2 220 ops/s | 28 ms | 42 ms |
+
+Unary transport (previous):
 
 | Workload | Throughput | p50 | p99 |
 | --- | --- | --- | --- |
@@ -183,5 +195,4 @@ Measured with `kvorumctl bench` against `scripts/run-local-cluster.sh` on a
 | 64 clients, `put` | 1 400 ops/s | 44.7 ms | 66.4 ms |
 
 Expect the single-client latency to track `fsync` latency on the data disk
-(two fsyncs per write) and the throughput ceiling to track available CPU,
-since every Raft message is one gRPC call.
+(two fsyncs per write) and the throughput ceiling to track available CPU.

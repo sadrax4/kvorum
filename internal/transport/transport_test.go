@@ -146,17 +146,17 @@ func TestStopWithFullQueueCompletesPromptly(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("first message never reached b")
 	}
-	// The sender is parked inside the blocked call; fill the queue, then
-	// overflow it.
-	for range queue {
-		a.tr.Send([]raft.Message{heartbeat})
+	// The receiver is stuck in the handler and no longer reads its side of
+	// the pipe, so HTTP/2 flow control stalls the sender on the first large
+	// message. The queue then fills and everything beyond it is dropped.
+	big := raft.Message{Type: raft.MsgApp, From: 1, To: 2, Term: 1,
+		Entries: []raft.Entry{{Index: 1, Term: 1, Data: make([]byte, 256<<10)}}}
+	const burst = 40
+	for range burst {
+		a.tr.Send([]raft.Message{big})
 	}
-	if got := a.metrics.dropped.Load(); got != 0 {
-		t.Fatalf("dropped %d before the queue was full", got)
-	}
-	a.tr.Send([]raft.Message{heartbeat, heartbeat, heartbeat})
-	if got := a.metrics.dropped.Load(); got != 3 {
-		t.Fatalf("dropped = %d, want 3", got)
+	if got := a.metrics.dropped.Load(); got < burst-queue-4 {
+		t.Fatalf("dropped = %d, want at least %d with a stalled receiver", got, burst-queue-4)
 	}
 
 	for _, tr := range []*Transport{a.tr, b.tr} {
@@ -296,4 +296,33 @@ func TestSnapshotToUnknownPeerIsReportedFailed(t *testing.T) {
 	if len(reports) != 1 || reports[0].id != 9 || reports[0].succeeded {
 		t.Fatalf("snapshot reports = %+v, want one failure for peer 9", reports)
 	}
+}
+
+// TestPipeRecoversAfterPeerRestart checks that the long-lived stream to a
+// peer is re-established after the peer goes away and comes back on the
+// same address.
+func TestPipeRecoversAfterPeerRestart(t *testing.T) {
+	t.Parallel()
+	b := startNode(t, 2, nil)
+	addr := b.tr.Address()
+	a := startNode(t, 1, nil)
+	connect(a, b)
+
+	hb := raft.Message{Type: raft.MsgHeartbeat, From: 1, To: 2, Term: 1}
+	a.tr.Send([]raft.Message{hb})
+	waitFor(t, 5*time.Second, func() bool { return len(b.handler.messages()) == 1 }, "first delivery")
+
+	b.tr.Stop()
+	// Sends while the peer is down fail and are reported; they must not
+	// block or poison the pipe.
+	a.tr.Send([]raft.Message{hb})
+	waitFor(t, 5*time.Second, func() bool { return a.metrics.sendFailed.Load() >= 1 }, "failure to be counted")
+
+	b2 := startNode(t, 2, func(c *Config) { c.ListenAddress = addr })
+	waitFor(t, 10*time.Second, func() bool {
+		a.tr.Send([]raft.Message{hb})
+		return len(b2.handler.messages()) >= 1
+	}, "delivery after the peer restarted")
+	a.tr.Stop()
+	b2.tr.Stop()
 }

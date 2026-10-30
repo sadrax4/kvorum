@@ -75,6 +75,38 @@ func (s *raftServer) Step(ctx context.Context, req *raftpb.StepRequest) (*raftpb
 	return &raftpb.StepResponse{}, nil
 }
 
+// Pipe implements raftpb.RaftServiceServer. Messages are delivered as they
+// arrive. A malformed message ends the stream with InvalidArgument, which
+// makes the sender reconnect; a message the handler rejects is logged and
+// skipped so that one bad message does not sever the pipe for the rest.
+func (s *raftServer) Pipe(stream raftpb.RaftService_PipeServer) error {
+	ctx := stream.Context()
+	for {
+		req, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return stream.SendAndClose(&raftpb.PipeResponse{})
+		}
+		if err != nil {
+			return err
+		}
+		pm := req.GetMessage()
+		if err := s.checkEnvelope(pm); err != nil {
+			return err
+		}
+		if pm.GetType() == uint32(raft.MsgSnap) {
+			return status.Error(codes.InvalidArgument, "MsgSnap must use InstallSnapshot")
+		}
+		m, err := FromProto(pm)
+		if err != nil {
+			return status.Error(codes.InvalidArgument, err.Error())
+		}
+		s.t.metrics.MessageReceived(m.Type, proto.Size(req))
+		if err := s.deliver(ctx, m); err != nil && (ctx.Err() != nil || s.t.ctx.Err() != nil) {
+			return err
+		}
+	}
+}
+
 // Publish implements raftpb.RaftServiceServer by handing the attributes to
 // the configured Publisher.
 func (s *raftServer) Publish(ctx context.Context, req *raftpb.PublishRequest) (*raftpb.PublishResponse, error) {

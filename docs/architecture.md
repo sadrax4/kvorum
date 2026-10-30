@@ -204,7 +204,11 @@ func (s *Store) Watch(start, end []byte, buffer int) *Watcher
 ## 4. `internal/transport` — peer networking
 
 gRPC transport implementing `RaftService`. One outbound queue and sender
-goroutine per peer; snapshots are streamed on a dedicated goroutine in chunks.
+goroutine per peer, writing to a long-lived client stream (`Pipe`) so that
+ordinary messages carry no per-RPC overhead; a write that fails or stalls
+beyond `SendTimeout` closes the stream, reports the peer unreachable, and the
+next message reopens it. Snapshots are streamed on a dedicated goroutine in
+chunks.
 
 ```go
 type Handler interface {

@@ -12,7 +12,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -692,5 +694,131 @@ func TestClientConcurrentWritesAndPublishedAddresses(t *testing.T) {
 	}
 	if len(res.KVs) != workers*perWorker {
 		t.Fatalf("scan found %d keys, want %d", len(res.KVs), workers*perWorker)
+	}
+}
+
+// TestCounterSurvivesLeaderCrashes is a small Jepsen-style check: eight
+// clients increment one counter with compare-and-swap while the leader is
+// crashed and restarted repeatedly. Every increment a client was told
+// succeeded must be reflected in the final value (no acknowledged write is
+// lost), and no increment may be applied twice (exactly-once retries), so the
+// final counter equals the number of acknowledged increments, allowing only
+// for attempts whose outcome the client could not learn.
+func TestCounterSurvivesLeaderCrashes(t *testing.T) {
+	c := newCluster(t, 3, clusterOptions{snapshotThreshold: 100})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	c.waitLeader()
+
+	endpoints := make([]string, 0, 3)
+	for id := raft.NodeID(1); id <= 3; id++ {
+		endpoints = append(endpoints, c.client[id])
+	}
+	cl, err := client.New(client.Config{Endpoints: endpoints, Logger: testLogger(t), RequestTimeout: 3 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+
+	const (
+		workers      = 8
+		perWorker    = 30
+		key          = "counter"
+		crashCycles  = 3
+		crashSpacing = 700 * time.Millisecond
+	)
+	var (
+		acked     atomic.Int64 // increments the client confirmed
+		ambiguous atomic.Int64 // increments whose outcome is unknown
+		wg        sync.WaitGroup
+	)
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for done := 0; done < perWorker; {
+				var current uint64
+				var version uint64
+				kv, err := cl.Get(ctx, []byte(key))
+				switch {
+				case err == nil:
+					version = kv.Version
+					current, err = strconv.ParseUint(string(kv.Value), 10, 64)
+					if err != nil {
+						t.Errorf("worker %d: counter holds %q", w, kv.Value)
+						return
+					}
+				case errors.Is(err, client.ErrNotFound):
+				default:
+					continue // retried by the loop; the client already backed off
+				}
+				res, err := cl.CompareAndSwap(ctx, []byte(key), version, []byte(strconv.FormatUint(current+1, 10)))
+				if err != nil {
+					// The client exhausted its retries without learning the
+					// outcome; stop counting this attempt either way.
+					ambiguous.Add(1)
+					done++
+					continue
+				}
+				if res.Succeeded {
+					acked.Add(1)
+					done++
+				}
+			}
+		}()
+	}
+
+	// Crash and restart whichever node leads, several times, while the
+	// clients are busy.
+	initial := make(map[raft.NodeID]string)
+	for id, addr := range c.raft {
+		initial[id] = addr
+	}
+	crashes := 0
+	for crashes < crashCycles {
+		time.Sleep(crashSpacing)
+		lead := c.waitLeader()
+		c.stop(lead.id)
+		crashes++
+		time.Sleep(crashSpacing / 2)
+		c.start(lead.id, initial, false)
+	}
+	wg.Wait()
+	if t.Failed() {
+		return
+	}
+
+	lead := c.waitLeader()
+	resp, err := c.get(ctx, lead, key, kvorumpb.ReadConsistency_READ_CONSISTENCY_LINEARIZABLE)
+	if err != nil || !resp.Found {
+		t.Fatalf("final read: %v, %v", resp, err)
+	}
+	final, err := strconv.ParseUint(string(resp.Kv.Value), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lo, hi := uint64(acked.Load()), uint64(acked.Load()+ambiguous.Load())
+	t.Logf("final counter %d, acknowledged %d, ambiguous %d, leader crashes %d", final, lo, ambiguous.Load(), crashes)
+	if final < lo {
+		t.Fatalf("lost acknowledged increments: counter %d < %d acknowledged", final, lo)
+	}
+	if final > hi {
+		t.Fatalf("increments applied more than once: counter %d > %d acknowledged + %d ambiguous", final, lo, ambiguous.Load())
+	}
+	if ambiguous.Load() > int64(workers*perWorker/4) {
+		t.Fatalf("too many ambiguous outcomes (%d): the client's retries are not working", ambiguous.Load())
+	}
+	// Every node converges on the same value.
+	for _, m := range c.live() {
+		eventually(t, 10*time.Second, func() error {
+			r, err := c.get(ctx, m, key, kvorumpb.ReadConsistency_READ_CONSISTENCY_STALE)
+			if err != nil {
+				return err
+			}
+			if string(r.Kv.Value) != strconv.FormatUint(final, 10) {
+				return fmt.Errorf("node %d has %q", m.id, r.Kv.Value)
+			}
+			return nil
+		})
 	}
 }

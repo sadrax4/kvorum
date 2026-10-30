@@ -188,6 +188,13 @@ roughly 1 500 elections, 1 700 crashes, 1 400 partitions, 1 300 membership
 changes, and 18 000 linearizable reads without a violation; 300 seeds per
 scenario pass in about 20 seconds.
 
+Statement coverage is 78% from the per-package unit tests alone and 90%
+once the integration tests are counted (`go test -coverpkg=./... ./...`).
+The integration suite also includes a small Jepsen-style check: eight
+clients increment one counter with compare-and-swap while the leader is
+crashed and restarted repeatedly, and the final value must equal the number
+of acknowledged increments.
+
 ```bash
 make test                          # everything, with -race
 make test-sim SIM_SEEDS=500        # more simulator seeds
@@ -204,19 +211,22 @@ End to end, through `kvorumctl bench` against the three-process cluster:
 
 | Workload | Throughput | p50 | p99 |
 | --- | --- | --- | --- |
-| 1 client, sequential `put` (128 B) | 590 ops/s | 1.5 ms | 5.0 ms |
-| 1 client, sequential linearizable `get` | 1 080 ops/s | 0.87 ms | 2.3 ms |
-| 16 clients, `put` | 1 320 ops/s | 11.7 ms | 21.5 ms |
-| 16 clients, linearizable `get` | 1 570 ops/s | 9.9 ms | 16.2 ms |
-| 64 clients, `put` | 1 400 ops/s | 44.7 ms | 66.4 ms |
+| 1 client, sequential `put` (128 B) | 720 ops/s | 1.3 ms | 2.7 ms |
+| 1 client, sequential linearizable `get` | 2 030 ops/s | 0.45 ms | 1.4 ms |
+| 64 clients, `put` | 2 220 ops/s | 28 ms | 42 ms |
 
 A write costs two fsyncs (leader and one follower) plus two network round
-trips, which is where the 1.5 ms single-client latency goes. Under
-concurrency the shared box saturates: a CPU profile of the leader shows the
-time split between fsync, the kernel network path, and gRPC/HTTP2 framing,
-with the Raft code itself far down the list. The clear next optimisation is a
-streaming RPC per peer instead of one unary call per Raft message; see the
-roadmap below.
+trips, which is where the single-client latency goes. Under concurrency the
+shared box saturates: a CPU profile of the leader shows the time split
+between fsync, the kernel network path, and gRPC/HTTP2 framing, with the
+Raft code itself far down the list.
+
+The transport originally issued one unary RPC per Raft message. Profiling
+showed the framing overhead and the per-message round trip dominating, so
+each peer now writes to a single long-lived stream instead. On the same box
+that change raised 64-client write throughput from 1 400 to 2 220 ops/s and
+halved linearizable read latency (0.87 ms to 0.45 ms); the before and after
+numbers are both recorded in [docs/operations.md](docs/operations.md).
 
 Micro-benchmarks (`make bench`):
 
@@ -264,9 +274,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow.
 
 Things that are deliberately out of scope today and would come next:
 
-- Streaming Raft transport (one bidirectional stream per peer) to cut the
-  per-message RPC overhead.
 - Asynchronous apply and snapshotting off the Ready loop.
+- Batching acknowledgements and heartbeats across followers.
 - TLS and client authentication.
 - Multi-version history with watch replay from an old revision.
 - Lease-based reads as an opt-in, clock-dependent fast path.

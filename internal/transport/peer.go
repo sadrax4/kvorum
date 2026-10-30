@@ -55,6 +55,14 @@ type peer struct {
 	closed bool
 	conn   *grpc.ClientConn
 	client raftpb.RaftServiceClient
+
+	// pipe is the long-lived client stream that carries ordinary messages;
+	// it is owned by the sender goroutine. pipeCancel tears it down, and
+	// watchdog cancels it when a single write stalls for longer than
+	// SendTimeout, which is how an unresponsive peer is detected.
+	pipe       raftpb.RaftService_PipeClient
+	pipeCancel context.CancelFunc
+	watchdog   *time.Timer
 }
 
 // newPeer creates the peer and starts its sender goroutine. The caller holds
@@ -72,6 +80,8 @@ func (t *Transport) newPeer(id raft.NodeID, addr string) *peer {
 		logger:      t.logger.With(slog.Uint64("peer", uint64(id)), slog.String("addr", addr)),
 		unreachable: newLimiter(t.now),
 	}
+	p.watchdog = time.AfterFunc(time.Hour, p.closePipe)
+	p.watchdog.Stop()
 	t.wg.Add(1)
 	go p.run()
 	return p
@@ -81,12 +91,13 @@ func (t *Transport) newPeer(id raft.NodeID, addr string) *peer {
 // that point are discarded; Raft retransmits whatever matters.
 func (p *peer) run() {
 	defer p.t.wg.Done()
+	defer p.closePipe()
 	for {
 		select {
 		case <-p.ctx.Done():
 			return
 		case m := <-p.queue:
-			p.step(m)
+			p.send(m)
 		}
 	}
 }
@@ -155,23 +166,72 @@ func (p *peer) getClient() (raftpb.RaftServiceClient, error) {
 }
 
 // step delivers one queued message with a unary call.
-func (p *peer) step(m raft.Message) {
+// send writes a message to the peer's pipe, opening it on demand. A write
+// that fails or stalls closes the pipe, reports the peer unreachable (rate
+// limited), and drops the message: Raft retransmits whatever matters, and
+// the next message reopens the pipe.
+func (p *peer) send(m raft.Message) {
 	if p.ctx.Err() != nil {
 		return
 	}
-	client, err := p.getClient()
+	stream, err := p.getPipe()
 	if err != nil {
 		p.fail(m.Type, err)
 		return
 	}
-	req := &raftpb.StepRequest{Message: ToProto(m)}
-	ctx, cancel := context.WithTimeout(p.ctx, p.t.cfg.SendTimeout)
-	defer cancel()
-	if _, err := client.Step(ctx, req); err != nil {
+	req := &raftpb.PipeRequest{Message: ToProto(m)}
+	p.watchdog.Reset(p.t.cfg.SendTimeout)
+	err = stream.Send(req)
+	p.watchdog.Stop()
+	if err != nil {
+		// Send reports io.EOF once the server has ended the stream; the
+		// status that explains why comes from CloseAndRecv.
+		if errors.Is(err, io.EOF) {
+			if _, rerr := stream.CloseAndRecv(); rerr != nil {
+				err = rerr
+			}
+		}
+		p.closePipe()
 		p.fail(m.Type, err)
 		return
 	}
 	p.t.metrics.MessageSent(m.Type, proto.Size(req))
+}
+
+// getPipe returns the open stream to the peer, creating it if necessary.
+func (p *peer) getPipe() (raftpb.RaftService_PipeClient, error) {
+	p.mu.Lock()
+	pipe := p.pipe
+	p.mu.Unlock()
+	if pipe != nil {
+		return pipe, nil
+	}
+	client, err := p.getClient()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(p.ctx)
+	stream, err := client.Pipe(ctx)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	p.mu.Lock()
+	p.pipe, p.pipeCancel = stream, cancel
+	p.mu.Unlock()
+	return stream, nil
+}
+
+// closePipe tears down the current stream, if any. It is safe to call from
+// the watchdog timer concurrently with the sender.
+func (p *peer) closePipe() {
+	p.mu.Lock()
+	cancel := p.pipeCancel
+	p.pipe, p.pipeCancel = nil, nil
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // fail records a delivery failure and reports the peer unreachable, at most

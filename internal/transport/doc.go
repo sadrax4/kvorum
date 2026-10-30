@@ -4,12 +4,15 @@
 //
 // A [Transport] serves inbound messages on a listener and keeps one outbound
 // [peer] per known member. Each peer owns a bounded queue and a single sender
-// goroutine that dials the member lazily and delivers queued messages with
-// unary Step calls. Snapshots are too large for a unary call, so a MsgSnap
-// bypasses the queue and is streamed on a dedicated goroutine through the
-// InstallSnapshot client stream: the first chunk carries the message header
-// (the MsgSnap with its metadata, produced by [ToProto]) and the following
-// chunks carry the snapshot payload in [Config.SnapshotChunkSize] pieces.
+// goroutine that dials the member lazily and writes queued messages to one
+// long-lived Pipe stream, so ordinary traffic pays no per-message RPC
+// overhead; a failed or stalled write closes the stream and the next message
+// reopens it. The unary Step call remains available for single messages.
+// Snapshots are too large for either, so a MsgSnap bypasses the queue and is
+// streamed on a dedicated goroutine through the InstallSnapshot client
+// stream: the first chunk carries the message header (the MsgSnap with its
+// metadata, produced by [ToProto]) and the following chunks carry the
+// snapshot payload in [Config.SnapshotChunkSize] pieces.
 //
 // # Delivery guarantees
 //

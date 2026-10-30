@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	RaftService_Step_FullMethodName            = "/kvorum.raft.v1.RaftService/Step"
 	RaftService_InstallSnapshot_FullMethodName = "/kvorum.raft.v1.RaftService/InstallSnapshot"
+	RaftService_Pipe_FullMethodName            = "/kvorum.raft.v1.RaftService/Pipe"
 	RaftService_Publish_FullMethodName         = "/kvorum.raft.v1.RaftService/Publish"
 )
 
@@ -37,6 +38,11 @@ type RaftServiceClient interface {
 	// the MsgSnap message header (without data); subsequent chunks carry the
 	// snapshot payload in order.
 	InstallSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[InstallSnapshotRequest, InstallSnapshotResponse], error)
+	// Pipe carries a sequence of messages from one member to another over a
+	// single long-lived call, which avoids the per-message overhead of Step.
+	// The server answers once the sender closes the stream; a malformed
+	// message ends the stream with an error and the sender reconnects.
+	Pipe(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PipeRequest, PipeResponse], error)
 	// Publish hands a member's client-facing address to the leader, which
 	// records it in the replicated membership table so that every node can
 	// redirect clients to whichever member is leader.
@@ -74,6 +80,19 @@ func (c *raftServiceClient) InstallSnapshot(ctx context.Context, opts ...grpc.Ca
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RaftService_InstallSnapshotClient = grpc.ClientStreamingClient[InstallSnapshotRequest, InstallSnapshotResponse]
 
+func (c *raftServiceClient) Pipe(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[PipeRequest, PipeResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &RaftService_ServiceDesc.Streams[1], RaftService_Pipe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PipeRequest, PipeResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RaftService_PipeClient = grpc.ClientStreamingClient[PipeRequest, PipeResponse]
+
 func (c *raftServiceClient) Publish(ctx context.Context, in *PublishRequest, opts ...grpc.CallOption) (*PublishResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PublishResponse)
@@ -97,6 +116,11 @@ type RaftServiceServer interface {
 	// the MsgSnap message header (without data); subsequent chunks carry the
 	// snapshot payload in order.
 	InstallSnapshot(grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]) error
+	// Pipe carries a sequence of messages from one member to another over a
+	// single long-lived call, which avoids the per-message overhead of Step.
+	// The server answers once the sender closes the stream; a malformed
+	// message ends the stream with an error and the sender reconnects.
+	Pipe(grpc.ClientStreamingServer[PipeRequest, PipeResponse]) error
 	// Publish hands a member's client-facing address to the leader, which
 	// records it in the replicated membership table so that every node can
 	// redirect clients to whichever member is leader.
@@ -116,6 +140,9 @@ func (UnimplementedRaftServiceServer) Step(context.Context, *StepRequest) (*Step
 }
 func (UnimplementedRaftServiceServer) InstallSnapshot(grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]) error {
 	return status.Error(codes.Unimplemented, "method InstallSnapshot not implemented")
+}
+func (UnimplementedRaftServiceServer) Pipe(grpc.ClientStreamingServer[PipeRequest, PipeResponse]) error {
+	return status.Error(codes.Unimplemented, "method Pipe not implemented")
 }
 func (UnimplementedRaftServiceServer) Publish(context.Context, *PublishRequest) (*PublishResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Publish not implemented")
@@ -166,6 +193,13 @@ func _RaftService_InstallSnapshot_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type RaftService_InstallSnapshotServer = grpc.ClientStreamingServer[InstallSnapshotRequest, InstallSnapshotResponse]
 
+func _RaftService_Pipe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(RaftServiceServer).Pipe(&grpc.GenericServerStream[PipeRequest, PipeResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RaftService_PipeServer = grpc.ClientStreamingServer[PipeRequest, PipeResponse]
+
 func _RaftService_Publish_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PublishRequest)
 	if err := dec(in); err != nil {
@@ -204,6 +238,11 @@ var RaftService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "InstallSnapshot",
 			Handler:       _RaftService_InstallSnapshot_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Pipe",
+			Handler:       _RaftService_Pipe_Handler,
 			ClientStreams: true,
 		},
 	},

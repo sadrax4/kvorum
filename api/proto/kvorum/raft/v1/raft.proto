@@ -13,6 +13,11 @@ service RaftService {
   // the MsgSnap message header (without data); subsequent chunks carry the
   // snapshot payload in order.
   rpc InstallSnapshot(stream InstallSnapshotRequest) returns (InstallSnapshotResponse);
+  // Pipe carries a sequence of messages from one member to another over a
+  // single long-lived call, which avoids the per-message overhead of Step.
+  // The server answers once the sender closes the stream; a malformed
+  // message ends the stream with an error and the sender reconnects.
+  rpc Pipe(stream PipeRequest) returns (PipeResponse);
   // Publish hands a member's client-facing address to the leader, which
   // records it in the replicated membership table so that every node can
   // redirect clients to whichever member is leader.
@@ -72,6 +77,12 @@ message StepRequest {
 }
 
 message StepResponse {}
+
+message PipeRequest {
+  Message message = 1;
+}
+
+message PipeResponse {}
 
 message InstallSnapshotRequest {
   oneof payload {

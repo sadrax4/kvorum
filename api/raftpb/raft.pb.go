@@ -472,6 +472,86 @@ func (*StepResponse) Descriptor() ([]byte, []int) {
 	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{5}
 }
 
+type PipeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       *Message               `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PipeRequest) Reset() {
+	*x = PipeRequest{}
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PipeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PipeRequest) ProtoMessage() {}
+
+func (x *PipeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PipeRequest.ProtoReflect.Descriptor instead.
+func (*PipeRequest) Descriptor() ([]byte, []int) {
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PipeRequest) GetMessage() *Message {
+	if x != nil {
+		return x.Message
+	}
+	return nil
+}
+
+type PipeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PipeResponse) Reset() {
+	*x = PipeResponse{}
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PipeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PipeResponse) ProtoMessage() {}
+
+func (x *PipeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PipeResponse.ProtoReflect.Descriptor instead.
+func (*PipeResponse) Descriptor() ([]byte, []int) {
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{7}
+}
+
 type InstallSnapshotRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
@@ -485,7 +565,7 @@ type InstallSnapshotRequest struct {
 
 func (x *InstallSnapshotRequest) Reset() {
 	*x = InstallSnapshotRequest{}
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[6]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -497,7 +577,7 @@ func (x *InstallSnapshotRequest) String() string {
 func (*InstallSnapshotRequest) ProtoMessage() {}
 
 func (x *InstallSnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[6]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -510,7 +590,7 @@ func (x *InstallSnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallSnapshotRequest.ProtoReflect.Descriptor instead.
 func (*InstallSnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{6}
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *InstallSnapshotRequest) GetPayload() isInstallSnapshotRequest_Payload {
@@ -562,7 +642,7 @@ type InstallSnapshotResponse struct {
 
 func (x *InstallSnapshotResponse) Reset() {
 	*x = InstallSnapshotResponse{}
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[7]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +654,7 @@ func (x *InstallSnapshotResponse) String() string {
 func (*InstallSnapshotResponse) ProtoMessage() {}
 
 func (x *InstallSnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[7]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +667,7 @@ func (x *InstallSnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallSnapshotResponse.ProtoReflect.Descriptor instead.
 func (*InstallSnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{7}
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{9}
 }
 
 type PublishRequest struct {
@@ -600,7 +680,7 @@ type PublishRequest struct {
 
 func (x *PublishRequest) Reset() {
 	*x = PublishRequest{}
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[8]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -612,7 +692,7 @@ func (x *PublishRequest) String() string {
 func (*PublishRequest) ProtoMessage() {}
 
 func (x *PublishRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[8]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -625,7 +705,7 @@ func (x *PublishRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishRequest.ProtoReflect.Descriptor instead.
 func (*PublishRequest) Descriptor() ([]byte, []int) {
-	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{8}
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PublishRequest) GetMemberId() uint64 {
@@ -650,7 +730,7 @@ type PublishResponse struct {
 
 func (x *PublishResponse) Reset() {
 	*x = PublishResponse{}
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[9]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -662,7 +742,7 @@ func (x *PublishResponse) String() string {
 func (*PublishResponse) ProtoMessage() {}
 
 func (x *PublishResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[9]
+	mi := &file_kvorum_raft_v1_raft_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -675,7 +755,7 @@ func (x *PublishResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishResponse.ProtoReflect.Descriptor instead.
 func (*PublishResponse) Descriptor() ([]byte, []int) {
-	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{9}
+	return file_kvorum_raft_v1_raft_proto_rawDescGZIP(), []int{11}
 }
 
 var File_kvorum_raft_v1_raft_proto protoreflect.FileDescriptor
@@ -722,7 +802,10 @@ const file_kvorum_raft_v1_raft_proto_rawDesc = "" +
 	"\btransfer\x18\x13 \x01(\bR\btransfer\"@\n" +
 	"\vStepRequest\x121\n" +
 	"\amessage\x18\x01 \x01(\v2\x17.kvorum.raft.v1.MessageR\amessage\"\x0e\n" +
-	"\fStepResponse\"l\n" +
+	"\fStepResponse\"@\n" +
+	"\vPipeRequest\x121\n" +
+	"\amessage\x18\x01 \x01(\v2\x17.kvorum.raft.v1.MessageR\amessage\"\x0e\n" +
+	"\fPipeResponse\"l\n" +
 	"\x16InstallSnapshotRequest\x121\n" +
 	"\x06header\x18\x01 \x01(\v2\x17.kvorum.raft.v1.MessageH\x00R\x06header\x12\x14\n" +
 	"\x04data\x18\x02 \x01(\fH\x00R\x04dataB\t\n" +
@@ -731,10 +814,11 @@ const file_kvorum_raft_v1_raft_proto_rawDesc = "" +
 	"\x0ePublishRequest\x12\x1b\n" +
 	"\tmember_id\x18\x01 \x01(\x04R\bmemberId\x12%\n" +
 	"\x0eclient_address\x18\x02 \x01(\tR\rclientAddress\"\x11\n" +
-	"\x0fPublishResponse2\x82\x02\n" +
+	"\x0fPublishResponse2\xc7\x02\n" +
 	"\vRaftService\x12A\n" +
 	"\x04Step\x12\x1b.kvorum.raft.v1.StepRequest\x1a\x1c.kvorum.raft.v1.StepResponse\x12d\n" +
-	"\x0fInstallSnapshot\x12&.kvorum.raft.v1.InstallSnapshotRequest\x1a'.kvorum.raft.v1.InstallSnapshotResponse(\x01\x12J\n" +
+	"\x0fInstallSnapshot\x12&.kvorum.raft.v1.InstallSnapshotRequest\x1a'.kvorum.raft.v1.InstallSnapshotResponse(\x01\x12C\n" +
+	"\x04Pipe\x12\x1b.kvorum.raft.v1.PipeRequest\x1a\x1c.kvorum.raft.v1.PipeResponse(\x01\x12J\n" +
 	"\aPublish\x12\x1e.kvorum.raft.v1.PublishRequest\x1a\x1f.kvorum.raft.v1.PublishResponseB-Z+github.com/sadrax4/kvorum/api/raftpb;raftpbb\x06proto3"
 
 var (
@@ -749,7 +833,7 @@ func file_kvorum_raft_v1_raft_proto_rawDescGZIP() []byte {
 	return file_kvorum_raft_v1_raft_proto_rawDescData
 }
 
-var file_kvorum_raft_v1_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_kvorum_raft_v1_raft_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_kvorum_raft_v1_raft_proto_goTypes = []any{
 	(*Entry)(nil),                   // 0: kvorum.raft.v1.Entry
 	(*ConfState)(nil),               // 1: kvorum.raft.v1.ConfState
@@ -757,28 +841,33 @@ var file_kvorum_raft_v1_raft_proto_goTypes = []any{
 	(*Message)(nil),                 // 3: kvorum.raft.v1.Message
 	(*StepRequest)(nil),             // 4: kvorum.raft.v1.StepRequest
 	(*StepResponse)(nil),            // 5: kvorum.raft.v1.StepResponse
-	(*InstallSnapshotRequest)(nil),  // 6: kvorum.raft.v1.InstallSnapshotRequest
-	(*InstallSnapshotResponse)(nil), // 7: kvorum.raft.v1.InstallSnapshotResponse
-	(*PublishRequest)(nil),          // 8: kvorum.raft.v1.PublishRequest
-	(*PublishResponse)(nil),         // 9: kvorum.raft.v1.PublishResponse
+	(*PipeRequest)(nil),             // 6: kvorum.raft.v1.PipeRequest
+	(*PipeResponse)(nil),            // 7: kvorum.raft.v1.PipeResponse
+	(*InstallSnapshotRequest)(nil),  // 8: kvorum.raft.v1.InstallSnapshotRequest
+	(*InstallSnapshotResponse)(nil), // 9: kvorum.raft.v1.InstallSnapshotResponse
+	(*PublishRequest)(nil),          // 10: kvorum.raft.v1.PublishRequest
+	(*PublishResponse)(nil),         // 11: kvorum.raft.v1.PublishResponse
 }
 var file_kvorum_raft_v1_raft_proto_depIdxs = []int32{
-	1, // 0: kvorum.raft.v1.SnapshotMeta.conf_state:type_name -> kvorum.raft.v1.ConfState
-	0, // 1: kvorum.raft.v1.Message.entries:type_name -> kvorum.raft.v1.Entry
-	2, // 2: kvorum.raft.v1.Message.snapshot_meta:type_name -> kvorum.raft.v1.SnapshotMeta
-	3, // 3: kvorum.raft.v1.StepRequest.message:type_name -> kvorum.raft.v1.Message
-	3, // 4: kvorum.raft.v1.InstallSnapshotRequest.header:type_name -> kvorum.raft.v1.Message
-	4, // 5: kvorum.raft.v1.RaftService.Step:input_type -> kvorum.raft.v1.StepRequest
-	6, // 6: kvorum.raft.v1.RaftService.InstallSnapshot:input_type -> kvorum.raft.v1.InstallSnapshotRequest
-	8, // 7: kvorum.raft.v1.RaftService.Publish:input_type -> kvorum.raft.v1.PublishRequest
-	5, // 8: kvorum.raft.v1.RaftService.Step:output_type -> kvorum.raft.v1.StepResponse
-	7, // 9: kvorum.raft.v1.RaftService.InstallSnapshot:output_type -> kvorum.raft.v1.InstallSnapshotResponse
-	9, // 10: kvorum.raft.v1.RaftService.Publish:output_type -> kvorum.raft.v1.PublishResponse
-	8, // [8:11] is the sub-list for method output_type
-	5, // [5:8] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	1,  // 0: kvorum.raft.v1.SnapshotMeta.conf_state:type_name -> kvorum.raft.v1.ConfState
+	0,  // 1: kvorum.raft.v1.Message.entries:type_name -> kvorum.raft.v1.Entry
+	2,  // 2: kvorum.raft.v1.Message.snapshot_meta:type_name -> kvorum.raft.v1.SnapshotMeta
+	3,  // 3: kvorum.raft.v1.StepRequest.message:type_name -> kvorum.raft.v1.Message
+	3,  // 4: kvorum.raft.v1.PipeRequest.message:type_name -> kvorum.raft.v1.Message
+	3,  // 5: kvorum.raft.v1.InstallSnapshotRequest.header:type_name -> kvorum.raft.v1.Message
+	4,  // 6: kvorum.raft.v1.RaftService.Step:input_type -> kvorum.raft.v1.StepRequest
+	8,  // 7: kvorum.raft.v1.RaftService.InstallSnapshot:input_type -> kvorum.raft.v1.InstallSnapshotRequest
+	6,  // 8: kvorum.raft.v1.RaftService.Pipe:input_type -> kvorum.raft.v1.PipeRequest
+	10, // 9: kvorum.raft.v1.RaftService.Publish:input_type -> kvorum.raft.v1.PublishRequest
+	5,  // 10: kvorum.raft.v1.RaftService.Step:output_type -> kvorum.raft.v1.StepResponse
+	9,  // 11: kvorum.raft.v1.RaftService.InstallSnapshot:output_type -> kvorum.raft.v1.InstallSnapshotResponse
+	7,  // 12: kvorum.raft.v1.RaftService.Pipe:output_type -> kvorum.raft.v1.PipeResponse
+	11, // 13: kvorum.raft.v1.RaftService.Publish:output_type -> kvorum.raft.v1.PublishResponse
+	10, // [10:14] is the sub-list for method output_type
+	6,  // [6:10] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_kvorum_raft_v1_raft_proto_init() }
@@ -786,7 +875,7 @@ func file_kvorum_raft_v1_raft_proto_init() {
 	if File_kvorum_raft_v1_raft_proto != nil {
 		return
 	}
-	file_kvorum_raft_v1_raft_proto_msgTypes[6].OneofWrappers = []any{
+	file_kvorum_raft_v1_raft_proto_msgTypes[8].OneofWrappers = []any{
 		(*InstallSnapshotRequest_Header)(nil),
 		(*InstallSnapshotRequest_Data)(nil),
 	}
@@ -796,7 +885,7 @@ func file_kvorum_raft_v1_raft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kvorum_raft_v1_raft_proto_rawDesc), len(file_kvorum_raft_v1_raft_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

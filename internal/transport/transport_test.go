@@ -314,9 +314,13 @@ func TestPipeRecoversAfterPeerRestart(t *testing.T) {
 
 	b.tr.Stop()
 	// Sends while the peer is down fail and are reported; they must not
-	// block or poison the pipe.
-	a.tr.Send([]raft.Message{hb})
-	waitFor(t, 5*time.Second, func() bool { return a.metrics.sendFailed.Load() >= 1 }, "failure to be counted")
+	// block or poison the pipe. The first write after the peer vanished may
+	// still be buffered before the closed connection is noticed, which is
+	// fine for Raft (it retransmits), so keep sending until one fails.
+	waitFor(t, 5*time.Second, func() bool {
+		a.tr.Send([]raft.Message{hb})
+		return a.metrics.sendFailed.Load() >= 1
+	}, "failure to be counted")
 
 	b2 := startNode(t, 2, func(c *Config) { c.ListenAddress = addr })
 	waitFor(t, 10*time.Second, func() bool {

@@ -47,3 +47,8 @@ development environment and what is expected of a change.
 - Keep pull requests focused. Describe the problem, the approach, and how you
   tested it; the pull request template asks for exactly that.
 - Design changes should come with an ADR in `docs/adr/`.
+
+## Code of conduct
+
+Everyone taking part in this project is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).

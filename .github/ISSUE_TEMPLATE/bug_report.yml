@@ -1,0 +1,63 @@
+name: Bug report
+description: Something behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. For security problems, please use
+        [a private vulnerability report](https://github.com/sadrax4/kvorum/security/advisories/new) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The behaviour you observed, including error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        Commands or client calls, cluster size, and the steps that lead to the problem.
+        For consensus bugs, a failing simulator seed is ideal:
+        `go test ./raft -run TestSimulation -sim.seed=N -v`
+      placeholder: |
+        1. Start a three-node cluster with scripts/run-local-cluster.sh
+        2. kvorumctl put ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kvorum version
+      description: Output of `kvorum --version`.
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Consensus (raft/)
+        - Storage (internal/wal)
+        - State machine (internal/kv)
+        - Transport (internal/transport)
+        - API, client, or CLI
+        - Deployment (Docker, Compose)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      render: text

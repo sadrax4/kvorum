@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/sadrax4/kvorum/security/advisories/new
+    about: Please report security problems privately, not as public issues.
+  - name: Architecture and design notes
+    url: https://github.com/sadrax4/kvorum/tree/main/docs
+    about: How kvorum works, the subtle parts of the Raft implementation, and the design decisions.

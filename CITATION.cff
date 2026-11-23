@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use kvorum in your work, please cite it using these metadata."
+title: "kvorum: a strongly consistent key-value store on a from-scratch Raft"
+type: software
+authors:
+  - alias: sadrax4
+repository-code: "https://github.com/sadrax4/kvorum"
+url: "https://pkg.go.dev/github.com/sadrax4/kvorum"
+abstract: >-
+  kvorum is a distributed, strongly consistent key-value store written in Go.
+  Its consensus core is a from-scratch, deterministic implementation of the
+  Raft algorithm, verified by a seeded simulation harness that injects network
+  partitions, message loss, reordering, and crashes.
+keywords:
+  - raft
+  - consensus
+  - distributed-systems
+  - key-value-store
+  - go
+license: MIT
+version: 1.0.0
+date-released: "2026-10-30"

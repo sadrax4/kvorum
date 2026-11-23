@@ -1,10 +1,38 @@
-# kvorum
+<p align="center">
+  <img src="docs/assets/logo.svg" width="112" alt="kvorum logo: a three-member Raft cluster">
+</p>
 
-[![CI](https://github.com/sadrax4/kvorum/actions/workflows/ci.yml/badge.svg)](https://github.com/sadrax4/kvorum/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/sadrax4/kvorum)](https://github.com/sadrax4/kvorum/releases)
-[![Go Reference](https://pkg.go.dev/badge/github.com/sadrax4/kvorum.svg)](https://pkg.go.dev/github.com/sadrax4/kvorum)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/sadrax4/kvorum)](go.mod)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<h1 align="center">kvorum</h1>
+
+<p align="center">
+  <b>A strongly consistent key-value store in Go, built on Raft written from scratch<br>
+  and verified by deterministic simulation.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sadrax4/kvorum/actions/workflows/ci.yml"><img src="https://github.com/sadrax4/kvorum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/sadrax4/kvorum/actions/workflows/codeql.yml"><img src="https://github.com/sadrax4/kvorum/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/sadrax4/kvorum/releases"><img src="https://img.shields.io/github/v/release/sadrax4/kvorum?sort=semver" alt="Release"></a>
+  <a href="https://pkg.go.dev/github.com/sadrax4/kvorum"><img src="https://pkg.go.dev/badge/github.com/sadrax4/kvorum.svg" alt="Go Reference"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/sadrax4/kvorum" alt="Go version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#guarantees">Guarantees</a> ·
+  <a href="#how-it-is-tested">Testing</a> ·
+  <a href="#performance">Performance</a> ·
+  <a href="docs/architecture.md">Architecture</a> ·
+  <a href="docs/raft-internals.md">Raft internals</a> ·
+  <a href="docs/adr/">Design decisions</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.svg" width="860" alt="Terminal recording: a value is written, read back from a follower, updated with compare-and-swap; the leader is killed, a new leader takes over, the value is still there, and a benchmark runs">
+  <br>
+  <sub>A real session against a three-node local cluster: write, read from a follower, compare-and-swap,<br>kill the leader, and keep serving after the re-election.</sub>
+</p>
 
 **kvorum** is a distributed, strongly consistent key-value store built on a
 from-scratch implementation of the Raft consensus algorithm in Go.
@@ -47,32 +75,29 @@ for local experimentation.
 
 ## Architecture
 
-```
-                       ┌──────────────────────────────┐
-   kvorumctl / client  │        cmd/kvorum (main)      │
-          │            │  flags, wiring, lifecycle     │
-          ▼            └──────────────┬───────────────┘
-   ┌──────────────┐                   │
-   │  gRPC  (KV,  │◄──────────────────┤
-   │  Admin, HTTP)│   internal/server │
-   └──────┬───────┘                   │
-          │ proposals / reads         │
-          ▼                           ▼
-   ┌─────────────────────────────────────────────────┐
-   │ internal/node — the Ready loop                   │
-   │  • drives raft.RawNode                           │
-   │  • persists HardState + entries (internal/wal)   │
-   │  • applies committed entries (internal/kv)       │
-   │  • sends messages (internal/transport)           │
-   │  • snapshots, membership, proposal waiters       │
-   └───────┬───────────────┬───────────────┬──────────┘
-           │               │               │
-     ┌─────▼─────┐   ┌─────▼─────┐   ┌─────▼────────┐
-     │   raft    │   │ internal/ │   │  internal/   │
-     │ (RawNode) │   │    wal    │   │  transport   │
-     │ stdlib    │   │ segments, │   │  gRPC peers, │
-     │ only      │   │ snapshots │   │  streaming   │
-     └───────────┘   └───────────┘   └──────────────┘
+```mermaid
+flowchart TB
+    client(["kvorumctl / Go client"])
+    peers(["other members"])
+
+    subgraph member["one kvorum member"]
+        direction TB
+        server["<b>internal/server</b><br/>KV and Admin gRPC, HTTP endpoints"]
+        node["<b>internal/node</b> — the Ready loop<br/>snapshots, membership, proposal waiters"]
+        raft["<b>raft</b><br/>RawNode, standard library only"]
+        wal["<b>internal/wal</b><br/>log segments and snapshots"]
+        kv["<b>internal/kv</b><br/>state machine, skip list"]
+        transport["<b>internal/transport</b><br/>one gRPC stream per peer"]
+
+        server -->|"proposals and reads"| node
+        node <-->|"Tick, Step, Ready, Advance"| raft
+        node -->|"persist HardState and entries"| wal
+        node -->|"apply committed entries"| kv
+        node -->|"send messages"| transport
+    end
+
+    client -->|gRPC| server
+    transport <-->|"Raft messages"| peers
 ```
 
 The `raft` package owns no goroutines, timers, sockets, or files. The
@@ -81,9 +106,26 @@ what to persist, send, and apply, and acknowledges it with `Advance`. That
 single design decision ([ADR 0001](docs/adr/0001-deterministic-raft-core.md))
 is what makes exhaustive simulation possible.
 
-A write travels: client → leader's gRPC server → `Propose` → appended to
-the WAL and replicated → committed by a quorum → applied to the in-memory
-store on every node → the proposal's waiter is resolved with the result.
+A write travels from the client to the leader, is made durable on a quorum,
+and is acknowledged only once the leader has applied it:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant L as Leader
+    participant F as Followers
+    C->>L: Put(key, value, session)
+    L->>L: Propose, append to the WAL and fsync
+    L->>F: AppendEntries
+    F->>F: append to the WAL and fsync
+    F-->>L: ack
+    Note over L: a quorum has the entry, so it is committed
+    L->>L: apply to the state machine, resolve the waiter
+    L-->>C: ok, revision
+    L->>F: new commit index
+    F->>F: apply
+```
 
 See [docs/architecture.md](docs/architecture.md) for the package contracts,
 [docs/raft-internals.md](docs/raft-internals.md) for the subtle parts of the
@@ -308,6 +350,13 @@ Things that are deliberately out of scope today and would come next:
   Stanford, 2014 — membership changes (§4), client interaction (§6).
 - The etcd Raft library, whose `Ready`/`Advance` interface this project's
   core is modelled on.
+
+## Contributing
+
+Bug reports, ideas, and pull requests are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and testing expectations,
+and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Security problems
+go through the private process in [SECURITY.md](SECURITY.md).
 
 ## License
 

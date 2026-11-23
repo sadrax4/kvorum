@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="kvorum">
+  <title>kvorum</title>
+  <!-- A three-member Raft cluster: the leader at the top replicates to two followers. -->
+  <g stroke="#64748b" stroke-width="5" stroke-linecap="round" fill="none">
+    <path d="M64 34 L30 92"/>
+    <path d="M64 34 L98 92"/>
+    <path d="M38 98 L90 98" stroke-dasharray="2 10"/>
+  </g>
+  <circle cx="64" cy="30" r="22" fill="#14b8a6" fill-opacity="0.18"/>
+  <circle cx="64" cy="30" r="15" fill="#14b8a6"/>
+  <path d="M57 31 l5 5 l9 -11" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <circle cx="28" cy="96" r="13" fill="#6366f1"/>
+  <circle cx="100" cy="96" r="13" fill="#6366f1"/>
+</svg>
